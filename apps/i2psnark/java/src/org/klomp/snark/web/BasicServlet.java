@@ -39,6 +39,7 @@ import net.i2p.data.DataHelper;
 import net.i2p.servlet.util.WriterOutputStream;
 import net.i2p.util.ByteCache;
 import net.i2p.util.Log;
+import net.i2p.util.SecureFile;
 import net.i2p.util.SystemVersion;
 
 
@@ -113,7 +114,7 @@ class BasicServlet extends HttpServlet
         String rb=getInitParameter("resourceBase");
         if (rb!=null)
         {
-            File f = new File(rb);
+            File f = new SecureFile(rb);
             setResourceBase(f);
         }
         String wb = getInitParameter("warBase");
@@ -124,10 +125,10 @@ class BasicServlet extends HttpServlet
     /**
      *  Files are served from here
      */
-    protected void setResourceBase(File base) throws UnavailableException {
+    protected synchronized void setResourceBase(File base) throws UnavailableException {
         if (!base.isDirectory()) {
-            _log.log(Log.CRIT, "Configured i2psnark directory " + base + " does not exist");
-            throw new UnavailableException("Resource base does not exist: " + base);
+            _log.error("Configured i2psnark directory " + base + " does not exist");
+            //throw new UnavailableException("Resource base does not exist: " + base);
         }
         _resourceBase = base;
         if (_log.shouldLog(Log.INFO))
@@ -156,12 +157,15 @@ class BasicServlet extends HttpServlet
      */
     public File getResource(String pathInContext)
     {
-        if (_resourceBase==null)
-            return null;
         File r = null;
         if (!pathInContext.contains("..") &&
                    !pathInContext.endsWith("/")) {
-            File f = new File(_resourceBase, pathInContext);
+            File f;
+            synchronized (this) {
+                if (_resourceBase==null)
+                    return null;
+                f = new File(_resourceBase, pathInContext);
+            }
             if (f.exists())
                 r = f;
         }
@@ -177,8 +181,6 @@ class BasicServlet extends HttpServlet
      */
     public HttpContent getContent(String pathInContext)
     {
-        if (_resourceBase==null)
-            return null;
         HttpContent r = null;
         if (_warBase != null && pathInContext.startsWith(_warBase)) {
             r = new JarContent(pathInContext);

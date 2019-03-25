@@ -18,7 +18,6 @@ public class ConfigHomeHandler extends FormHandler {
 
     @Override
     protected void processForm() {
-        if (_action == null) return;
         String group = getJettyString("group");
         boolean deleting = _action.equals(_t("Delete selected"));
         boolean adding = _action.equals(_t("Add item"));
@@ -27,7 +26,7 @@ public class ConfigHomeHandler extends FormHandler {
             boolean old = _context.getBooleanProperty(HomeHelper.PROP_OLDHOME);
             boolean nnew = getJettyString("oldHome") != null;
             if (old != nnew) {
-                _context.router().saveConfig(HomeHelper.PROP_OLDHOME, "" + nnew);
+                _context.router().saveConfig(HomeHelper.PROP_OLDHOME, Boolean.toString(nnew));
                 addFormNotice(_t("Home page changed"));
             }
         } else if (adding || deleting || restoring) {

@@ -19,6 +19,7 @@ import java.util.List;
 
 import net.i2p.I2PAppContext;
 import net.i2p.crypto.DSAEngine;
+import net.i2p.crypto.SigType;
 import net.i2p.util.Clock;
 import net.i2p.util.Log;
 import net.i2p.util.RandomSource;
@@ -59,21 +60,21 @@ import net.i2p.util.RandomSource;
  * @author jrandom
  */
 public class LeaseSet extends DatabaseEntry {
-    private Destination _destination;
-    private PublicKey _encryptionKey;
-    private SigningPublicKey _signingKey;
+    protected Destination _destination;
+    protected PublicKey _encryptionKey;
+    protected SigningPublicKey _signingKey;
     // Keep leases in the order received, or else signature verification will fail!
-    private final List<Lease> _leases;
-    private boolean _receivedAsPublished;
+    protected final List<Lease> _leases;
+    protected boolean _receivedAsPublished;
     private boolean _receivedAsReply;
     // Store these since isCurrent() and getEarliestLeaseDate() are called frequently
     private long _firstExpiration;
-    private long _lastExpiration;
+    protected long _lastExpiration;
     private List<Lease> _decryptedLeases;
     private boolean _decrypted;
-    private boolean _checked;
+    protected boolean _checked;
     // cached byte version
-    private volatile byte _byteified[];
+    protected volatile byte _byteified[];
 
     /**
      *  Unlimited before 0.6.3;
@@ -141,9 +142,8 @@ public class LeaseSet extends DatabaseEntry {
 
     /**
      *  The revocation key.
-     *  @deprecated unused
+     *  Undeprecated as of 0.9.38, used for the blinded key in EncryptedLeaseSet.
      */
-    @Deprecated
     public SigningPublicKey getSigningKey() {
         return _signingKey;
     }
@@ -186,7 +186,8 @@ public class LeaseSet extends DatabaseEntry {
     public void addLease(Lease lease) {
         if (lease == null) throw new IllegalArgumentException("erm, null lease");
         if (lease.getGateway() == null) throw new IllegalArgumentException("erm, lease has no gateway");
-        if (lease.getTunnelId() == null) throw new IllegalArgumentException("erm, lease has no tunnel");
+        if (getType() != KEY_TYPE_META_LS2 && lease.getTunnelId() == null)
+            throw new IllegalArgumentException("erm, lease has no tunnel");
         if (_signature != null)
             throw new IllegalStateException();
         if (_leases.size() >= MAX_LEASES)
@@ -287,23 +288,21 @@ public class LeaseSet extends DatabaseEntry {
         return _lastExpiration > now - fudge;
     }
 
+    /** without sig! */
     protected byte[] getBytes() {
         if (_byteified != null) return _byteified;
         if ((_destination == null) || (_encryptionKey == null) || (_signingKey == null))
             return null;
-        int len = _destination.size()
-                + PublicKey.KEYSIZE_BYTES // encryptionKey
-                + _signingKey.length() // signingKey
-                + 1
-                + _leases.size() * 44; // leases
+        int len = size();
         ByteArrayOutputStream out = new ByteArrayOutputStream(len);
         try {
             _destination.writeBytes(out);
             _encryptionKey.writeBytes(out);
             _signingKey.writeBytes(out);
             out.write((byte) _leases.size());
-            for (Lease lease : _leases)
+            for (Lease lease : _leases) {
                 lease.writeBytes(out);
+            }
         } catch (IOException ioe) {
             return null;
         } catch (DataFormatException dfe) {
@@ -327,9 +326,15 @@ public class LeaseSet extends DatabaseEntry {
         _destination = Destination.create(in);
         _encryptionKey = PublicKey.create(in);
         // revocation signing key must be same type as the destination signing key
-        _signingKey = new SigningPublicKey(_destination.getSigningPublicKey().getType());
+        SigType type = _destination.getSigningPublicKey().getType();
+        // Even if not verifying, we have to construct a Signature object
+        // below, which will fail for null type.
+        if (type == null)
+            throw new DataFormatException("unknown sig type");
+        _signingKey = new SigningPublicKey(type);
+        // EOF will be thrown in signature read below
         _signingKey.readBytes(in);
-        int numLeases = (int) DataHelper.readLong(in, 1);
+        int numLeases = in.read();
         if (numLeases > MAX_LEASES)
             throw new DataFormatException("Too many leases - max is " + MAX_LEASES);
         //_version = DataHelper.readLong(in, 4);
@@ -339,7 +344,7 @@ public class LeaseSet extends DatabaseEntry {
             addLease(lease);
         }
         // signature must be same type as the destination signing key
-        _signature = new Signature(_destination.getSigningPublicKey().getType());
+        _signature = new Signature(type);
         _signature.readBytes(in);
     }
     
@@ -354,8 +359,9 @@ public class LeaseSet extends DatabaseEntry {
         _encryptionKey.writeBytes(out);
         _signingKey.writeBytes(out);
         out.write((byte) _leases.size());
-        for (Lease lease : _leases)
+        for (Lease lease : _leases) {
             lease.writeBytes(out);
+        }
         _signature.writeBytes(out);
     }
     
@@ -367,7 +373,7 @@ public class LeaseSet extends DatabaseEntry {
              + PublicKey.KEYSIZE_BYTES // encryptionKey
              + _signingKey.length() // signingKey
              + 1 // number of leases
-             + _leases.size() * (Hash.HASH_LENGTH + 4 + 8);
+             + _leases.size() * 44;
     }
     
     @Override
@@ -381,7 +387,6 @@ public class LeaseSet extends DatabaseEntry {
                && DataHelper.eq(getEncryptionKey(), ls.getEncryptionKey())
                && DataHelper.eq(_signingKey, ls.getSigningKey())
                && DataHelper.eq(_destination, ls.getDestination());
-
     }
     
     /** the destination has enough randomness in it to use it by itself for speed */
@@ -396,10 +401,12 @@ public class LeaseSet extends DatabaseEntry {
     public String toString() {
         StringBuilder buf = new StringBuilder(128);
         buf.append("[LeaseSet: ");
-        buf.append("\n\tDestination: ").append(_destination);
+        if (_destination != null) {
+            buf.append("\n\tDestination: ").append(_destination);
+            buf.append("\n\tB32: ").append(_destination.toBase32());
+        }
         buf.append("\n\tEncryptionKey: ").append(_encryptionKey);
         buf.append("\n\tSigningKey: ").append(_signingKey);
-        //buf.append("\n\tVersion: ").append(getVersion());
         buf.append("\n\tSignature: ").append(_signature);
         buf.append("\n\tLeases: #").append(getLeaseCount());
         for (int i = 0; i < getLeaseCount(); i++)

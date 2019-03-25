@@ -18,7 +18,7 @@
   /* but might want to POST to it anyway ??? */
 %>
 <jsp:useBean class="net.i2p.i2ptunnel.web.EditBean" id="editBean" scope="request" />
-<jsp:useBean class="net.i2p.i2ptunnel.web.Messages" id="intl" scope="request" />
+<jsp:useBean class="net.i2p.i2ptunnel.ui.Messages" id="intl" scope="request" />
 <%
    RequestWrapper wrequest = new RequestWrapper(request);
    String tun = wrequest.getParameter("tunnel");
@@ -127,6 +127,8 @@ input.default { width: 1px; height: 1px; visibility: hidden; }
            SigningPrivateKey spk = editBean.getSigningPrivateKey(curTunnel);
            if (spk == null) {
                %><tr><td class="infohelp"><%=intl._t("Destination signing key is not available. Start the tunnel.")%></td></tr><%
+           } else if (spk.isOffline()) {
+               %><tr><td class="infohelp"><%=intl._t("Destination signing key is offline. Use CLI tools on the offline machine.")%></td></tr><%
            } else {
                valid = true;
                OrderedProperties props = new OrderedProperties();

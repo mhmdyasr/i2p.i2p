@@ -27,11 +27,14 @@ public abstract class SystemVersion {
 
     private static final boolean _isWin = System.getProperty("os.name").startsWith("Win");
     private static final boolean _isMac = System.getProperty("os.name").startsWith("Mac");
-    private static final boolean _isArm = System.getProperty("os.arch").startsWith("arm");
+    private static final boolean _isArm = System.getProperty("os.arch").startsWith("arm") ||
+                                          System.getProperty("os.arch").startsWith("aarch");
     private static final boolean _isX86 = System.getProperty("os.arch").contains("86") ||
                                           System.getProperty("os.arch").equals("amd64");
     private static final boolean _isGentoo = System.getProperty("os.version").contains("gentoo") ||
                                              System.getProperty("os.version").contains("hardened");  // Funtoo
+    // Could also check for java.vm.info = "interpreted mode"
+    private static final boolean _isZero = System.getProperty("java.vm.name").contains("Zero");
     private static final boolean _isAndroid;
     private static final boolean _isApache;
     private static final boolean _isGNU;
@@ -46,6 +49,7 @@ public abstract class SystemVersion {
     private static final boolean _oneDotEight;
     private static final boolean _oneDotNine;
     private static final boolean _oneDotTen;
+    private static final boolean _oneDotEleven;
     private static final int _androidSDK;
 
     static {
@@ -71,7 +75,7 @@ public abstract class SystemVersion {
         _isLinuxService = !_isWin && !_isMac && !_isAndroid &&
                           (DAEMON_USER.equals(System.getProperty("user.name")) ||
                            (_isGentoo && GENTOO_USER.equals(System.getProperty("user.name"))));
-        _isSlow = _isAndroid || _isApache || _isArm || _isGNU || getMaxMemory() < 48*1024*1024L;
+        _isSlow = _isAndroid || _isApache || _isArm || _isGNU || _isZero || getMaxMemory() < 48*1024*1024L;
 
         int sdk = 0;
         if (_isAndroid) {
@@ -91,6 +95,7 @@ public abstract class SystemVersion {
             _oneDotEight = false;
             _oneDotNine = false;
             _oneDotTen = false;
+            _oneDotEleven = false;
         } else {
             String version = System.getProperty("java.version");
             // handle versions like "8-ea" or "9-internal"
@@ -102,6 +107,7 @@ public abstract class SystemVersion {
             _oneDotNine = _oneDotEight && VersionComparator.comp(version, "1.9") >= 0;
             // Starting 2018, versions are YY.M, this works for that also
             _oneDotTen = _oneDotNine && VersionComparator.comp(version, "1.10") >= 0;
+            _oneDotEleven = _oneDotTen && VersionComparator.comp(version, "1.11") >= 0;
         }
     }
 
@@ -157,6 +163,14 @@ public abstract class SystemVersion {
      */
     public static boolean isX86() {
         return _isX86;
+    }
+
+    /**
+     *  Is this a very slow interpreted mode VM?
+     *  @since 0.9.38
+     */
+    public static boolean isZeroVM() {
+        return _isZero;
     }
 
     /**
@@ -217,6 +231,15 @@ public abstract class SystemVersion {
      */
     public static boolean isJava10() {
         return _oneDotTen;
+    }
+
+    /**
+     *
+     *  @return true if Java 11 or higher, false for Android.
+     *  @since 0.9.35
+     */
+    public static boolean isJava11() {
+        return _oneDotEleven;
     }
 
     /**
@@ -317,6 +340,7 @@ public abstract class SystemVersion {
         System.out.println("Java 8   : " + isJava8());
         System.out.println("Java 9   : " + isJava9());
         System.out.println("Java 10  : " + isJava10());
+        System.out.println("Java 11  : " + isJava11());
         System.out.println("Android  : " + isAndroid());
         if (isAndroid())
             System.out.println("  Version: " + getAndroidVersion());
@@ -327,12 +351,12 @@ public abstract class SystemVersion {
         System.out.println("GNU      : " + isGNU());
         System.out.println("Linux Svc: " + isLinuxService());
         System.out.println("Mac      : " + isMac());
+        System.out.println("Max mem  : " + getMaxMemory());
         System.out.println("OpenJDK  : " + isOpenJDK());
         System.out.println("Slow     : " + isSlow());
         System.out.println("Windows  : " + isWindows());
         System.out.println("Wrapper  : " + hasWrapper());
         System.out.println("x86      : " + isX86());
-        System.out.println("Max mem  : " + getMaxMemory());
-
+        System.out.println("Zero JVM : " + isZeroVM());
     }
 }

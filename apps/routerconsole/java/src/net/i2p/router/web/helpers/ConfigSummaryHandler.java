@@ -20,7 +20,6 @@ public class ConfigSummaryHandler extends FormHandler {
     
     @Override
     protected void processForm() {
-        if (_action == null) return;
         String group = getJettyString("group");
         boolean deleting = _action.equals(_t("Delete selected"));
         boolean adding = _action.equals(_t("Add item"));
@@ -30,7 +29,7 @@ public class ConfigSummaryHandler extends FormHandler {
             try {
                 int refreshInterval = Integer.parseInt(getJettyString("refreshInterval"));
                 if (refreshInterval >= CSSHelper.MIN_REFRESH) {
-                    _context.router().saveConfig(CSSHelper.PROP_REFRESH, "" + refreshInterval);
+                    _context.router().saveConfig(CSSHelper.PROP_REFRESH, Integer.toString(refreshInterval));
                     addFormNotice(_t("Refresh interval changed"));
                 } else
                     addFormError(_t("Refresh interval must be at least {0} seconds", CSSHelper.MIN_REFRESH));
@@ -102,10 +101,11 @@ public class ConfigSummaryHandler extends FormHandler {
                         continue;
                     }
                 }
-                for (Iterator<Integer> iter = sections.keySet().iterator(); iter.hasNext(); ) {
-                    int i = iter.next();
+                for (Iterator<Map.Entry<Integer, String>> iter = sections.entrySet().iterator(); iter.hasNext(); ) {
+                    Map.Entry<Integer, String> e = iter.next();
+                    Integer i = e.getKey();
                     if (toDelete.contains(i)) {
-                        String removedName = sections.get(i);
+                        String removedName = e.getValue();
                         iter.remove();
                         addFormNotice(_t("Removed") + ": " + removedName);
                     }

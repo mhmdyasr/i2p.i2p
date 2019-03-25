@@ -2,9 +2,9 @@ package net.i2p.router.web.helpers;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.io.Writer;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,7 +24,6 @@ import net.i2p.stat.Rate;
  *  /graphs.jsp, including form, and /graph.jsp
  */
 public class GraphHelper extends FormHandler {
-    protected Writer _out;
     private int _periodCount;
     private boolean _showEvents;
     private int _width;
@@ -72,12 +71,6 @@ public class GraphHelper extends FormHandler {
         // shorten the refresh by 3 seconds so we beat the iframe
         return "<meta http-equiv=\"refresh\" content=\"" + (_refreshDelaySeconds - 3) + "\">";
     }
-
-    /**
-     *  This was a HelperBase but now it's a FormHandler
-     *  @since 0.8.2
-     */
-    public void storeWriter(Writer out) { _out = out; }
 
     public void setPeriodCount(String str) { 
         setC(str);
@@ -146,10 +139,11 @@ public class GraphHelper extends FormHandler {
     }
 
     public String getImages() { 
-        if (StatSummarizer.isDisabled())
+        StatSummarizer ss = StatSummarizer.instance(_context);
+        if (ss == null)
             return "";
         try {
-            List<SummaryListener> listeners = StatSummarizer.instance().getListeners();
+            List<SummaryListener> listeners = ss.getListeners();
             TreeSet<SummaryListener> ordered = new TreeSet<SummaryListener>(new AlphaComparator());
             ordered.addAll(listeners);
 
@@ -164,6 +158,13 @@ public class GraphHelper extends FormHandler {
             boolean hideLegend = _context.getProperty(PROP_LEGEND, DEFAULT_LEGEND);
 
             if (hasTx && hasRx && !_showEvents) {
+                // remove individual tx/rx graphs if displaying combined
+                for (Iterator<SummaryListener> iter = ordered.iterator(); iter.hasNext(); ) {
+                    SummaryListener lsnr = iter.next();
+                    String title = lsnr.getRate().getRateStat().getName();
+                    if (title.equals("bw.sendRate") || title.equals("bw.recvRate"))
+                        iter.remove();
+                }
                 _out.write("<a href=\"graph?stat=bw.combined"
                            + "&amp;c=" + (3 * _periodCount )
                            + "&amp;w=" + (3 * _width)
@@ -227,9 +228,10 @@ public class GraphHelper extends FormHandler {
      *  @since 0.9
      */
     public String getSingleStat() {
+        StatSummarizer ss = StatSummarizer.instance(_context);
+        if (ss == null)
+            return "";
         try {
-            if (StatSummarizer.isDisabled())
-                return "";
             if (_stat == null) {
                 _out.write("No stat specified");
                 return "";
@@ -241,7 +243,7 @@ public class GraphHelper extends FormHandler {
                 name = _stat;
                 displayName = _t("Bandwidth usage");
             } else {
-                Set<Rate> rates = StatSummarizer.instance().parseSpecs(_stat);
+                Set<Rate> rates = ss.parseSpecs(_stat);
                 if (rates.size() != 1) {
                     _out.write("Graphs not enabled for " + _stat);
                     return "";
@@ -368,7 +370,8 @@ public class GraphHelper extends FormHandler {
     private static final int[] times = { 15, 30, 60, 2*60, 5*60, 10*60, 30*60, 60*60, -1 };
 
     public String getForm() { 
-        if (StatSummarizer.isDisabled())
+        StatSummarizer ss = StatSummarizer.instance(_context);
+        if (ss == null)
             return "";
         // too hard to use the standard formhandler.jsi / FormHandler.java session nonces
         // since graphs.jsp needs the refresh value in its <head>.
@@ -392,10 +395,10 @@ public class GraphHelper extends FormHandler {
             for (int i = 0; i < times.length; i++) {
                 _out.write("<option value=\"");
                 _out.write(Integer.toString(times[i]));
-                _out.write("\"");
+                _out.write('"');
                 if (times[i] == _refreshDelaySeconds)
                     _out.write(" selected=\"selected\"");
-                _out.write(">");
+                _out.write('>');
                 if (times[i] > 0)
                     _out.write(DataHelper.formatDuration2(times[i] * 1000));
                 else
@@ -432,7 +435,7 @@ public class GraphHelper extends FormHandler {
      */
     @Override
     public String getAllMessages() {
-        if (StatSummarizer.isDisabled()) {
+        if (StatSummarizer.isDisabled(_context)) {
             addFormError("Graphing not supported with this JVM: " +
                          System.getProperty("java.vendor") + ' ' +
                          System.getProperty("java.version") + " (" +
@@ -469,13 +472,13 @@ public class GraphHelper extends FormHandler {
             _graphHideLegend != _context.getProperty(PROP_LEGEND, DEFAULT_LEGEND) ||
             _persistent != _context.getBooleanPropertyDefaultTrue(SummaryListener.PROP_PERSISTENT)) {
             Map<String, String> changes = new HashMap<String, String>();
-            changes.put(PROP_X, "" + _width);
-            changes.put(PROP_Y, "" + _height);
-            changes.put(PROP_PERIODS, "" + _periodCount);
-            changes.put(PROP_REFRESH, "" + _refreshDelaySeconds);
-            changes.put(PROP_EVENTS, "" + _showEvents);
-            changes.put(PROP_LEGEND, "" + _graphHideLegend);
-            changes.put(SummaryListener.PROP_PERSISTENT, "" + _persistent);
+            changes.put(PROP_X, Integer.toString(_width));
+            changes.put(PROP_Y, Integer.toString(_height));
+            changes.put(PROP_PERIODS, Integer.toString(_periodCount));
+            changes.put(PROP_REFRESH, Integer.toString(_refreshDelaySeconds));
+            changes.put(PROP_EVENTS, Boolean.toString(_showEvents));
+            changes.put(PROP_LEGEND, Boolean.toString(_graphHideLegend));
+            changes.put(SummaryListener.PROP_PERSISTENT, Boolean.toString(_persistent));
             _context.router().saveConfig(changes, null);
             addFormNotice(_t("Graph settings saved"));
         }

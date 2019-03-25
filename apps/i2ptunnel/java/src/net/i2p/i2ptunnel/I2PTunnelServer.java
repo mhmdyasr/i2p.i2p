@@ -62,8 +62,8 @@ public class I2PTunnelServer extends I2PTunnelTask implements Runnable {
     protected final Logging l;
     private I2PSSLSocketFactory _sslFactory;
 
-    private static final long DEFAULT_READ_TIMEOUT = 5*60*1000;
-    /** default timeout to 5 minutes - override if desired */
+    private static final long DEFAULT_READ_TIMEOUT = -1;
+    /** default timeout - override if desired */
     protected long readTimeout = DEFAULT_READ_TIMEOUT;
 
     /** do we use threads? default true (ignored for standard servers, always false) */
@@ -210,7 +210,7 @@ public class I2PTunnelServer extends I2PTunnelTask implements Runnable {
     private I2PSocketManager createManager(InputStream privData) {
         Properties props = new Properties();
         props.putAll(getTunnel().getClientOptions());
-        int portNum = 7654;
+        int portNum = I2PClient.DEFAULT_LISTEN_PORT;
         if (getTunnel().port != null) {
             try {
                 portNum = Integer.parseInt(getTunnel().port);
@@ -305,7 +305,7 @@ public class I2PTunnelServer extends I2PTunnelTask implements Runnable {
                 // try to make this error sensible as it will happen...
                 String portNum = getTunnel().port;
                 if (portNum == null)
-                    portNum = "7654";
+                    portNum = Integer.toString(I2PClient.DEFAULT_LISTEN_PORT);
                 String msg;
                 if (getTunnel().getContext().isRouterContext())
                     msg = "Unable to build tunnels for the server at " + remoteHost.getHostAddress() + ':' + remotePort;
@@ -371,6 +371,17 @@ public class I2PTunnelServer extends I2PTunnelTask implements Runnable {
      * Set the read idle timeout for newly-created connections (in
      * milliseconds).  After this time expires without data being reached from
      * the I2P network, the connection itself will be closed.
+     *
+     * Less than or equal to 0 means forever.
+     * Default -1 (forever) as of 0.9.36 for standard tunnels,
+     * but extending classes may override.
+     * Prior to that, default was 5 minutes, but did not work
+     * due to streaming bugs.
+     *
+     * Applies only to future connections;
+     * calling this does not affect existing connections.
+     *
+     * @param ms in ms
      */
     public void setReadTimeout(long ms) {
         readTimeout = ms;
@@ -379,6 +390,12 @@ public class I2PTunnelServer extends I2PTunnelTask implements Runnable {
     /**
      * Get the read idle timeout for newly-created connections (in
      * milliseconds).
+     *
+     * Less than or equal to 0 means forever.
+     * Default -1 (forever) as of 0.9.36 for standard tunnels,
+     * but extending classes may override.
+     * Prior to that, default was 5 minutes, but did not work
+     * due to streaming bugs.
      *
      * @return The read timeout used for connections
      */
@@ -593,9 +610,13 @@ public class I2PTunnelServer extends I2PTunnelTask implements Runnable {
             } catch (ConnectException ce) {
                 if (_log.shouldLog(Log.ERROR))
                     _log.error("Error accepting", ce);
-                open = false;
                 if (i2ps != null) try { i2ps.close(); } catch (IOException ioe) {}
-                break;
+                try {
+                    Thread.sleep(2*60*1000);
+                } catch (InterruptedException ie) {}
+                // Server socket possbily closed out from under us, perhaps as part of a router restart;
+                // wait a while and try to get a new socket
+                i2pss = sockMgr.getServerSocket();
             } catch(SocketTimeoutException ste) {
                 // ignored, we never set the timeout
                 if (i2ps != null) try { i2ps.close(); } catch (IOException ioe) {}

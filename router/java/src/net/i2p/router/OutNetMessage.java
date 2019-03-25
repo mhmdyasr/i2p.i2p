@@ -29,14 +29,13 @@ import net.i2p.util.Log;
  *
  */
 public class OutNetMessage implements CDPQEntry {
-    private final Log _log;
     private final RouterContext _context;
     private final RouterInfo _target;
     private final I2NPMessage _message;
     private final int _messageTypeId;
     /** cached message ID, for use after we discard the message */
     private final long _messageId;
-    private final long _messageSize;
+    private final int _messageSize;
     private final int _priority;
     private final long _expiration;
     private Job _onSend;
@@ -50,6 +49,7 @@ public class OutNetMessage implements CDPQEntry {
     private final long _created;
     private long _enqueueTime;
     private long _seqNum;
+    private final boolean _shouldTimestamp;
     /** for debugging, contains a mapping of even name to Long (e.g. "begin sending", "handleOutbound", etc) */
     private HashMap<String, Long> _timestamps;
     /**
@@ -96,7 +96,6 @@ public class OutNetMessage implements CDPQEntry {
      */
     public OutNetMessage(RouterContext context, I2NPMessage msg, long expiration, int priority, RouterInfo target) {
         _context = context;
-        _log = context.logManager().getLog(OutNetMessage.class);
         _message = msg;
         if (msg != null) {
             _messageTypeId = msg.getType();
@@ -113,7 +112,9 @@ public class OutNetMessage implements CDPQEntry {
 
         //_createdBy = new Exception("Created by");
         _created = context.clock().now();
-        if (_log.shouldLog(Log.INFO))
+        Log log = context.logManager().getLog(OutNetMessage.class);
+        _shouldTimestamp = log.shouldLog(Log.INFO);
+        if (_shouldTimestamp)
             timestamp("Created");
         //_context.messageStateMonitor().outboundMessageAdded();
         //_context.statManager().createRateStat("outNetMessage.timeToDiscard", 
@@ -126,12 +127,11 @@ public class OutNetMessage implements CDPQEntry {
      * Only useful if log level is INFO or DEBUG
      *
      * @param eventName what occurred 
-     * @return how long this message has been 'in flight'
      */
-    public long timestamp(String eventName) {
-        long now = _context.clock().now();
-        if (_log.shouldLog(Log.INFO)) {
+    public void timestamp(String eventName) {
+        if (_shouldTimestamp) {
             // only timestamp if we are debugging
+            long now = _context.clock().now();
             synchronized (this) {
                 locked_initTimestamps();
                 // ???
@@ -142,13 +142,12 @@ public class OutNetMessage implements CDPQEntry {
                 _timestampOrder.add(eventName);
             }
         }
-        return now - _created;
     }
 
     /** @deprecated unused */
     @Deprecated
     public Map<String, Long> getTimestamps() {
-        if (_log.shouldLog(Log.INFO)) {
+        if (_shouldTimestamp) {
             synchronized (this) {
                 locked_initTimestamps();
                 return new HashMap<String, Long>(_timestamps);
@@ -160,7 +159,7 @@ public class OutNetMessage implements CDPQEntry {
     /** @deprecated unused */
     @Deprecated
     public Long getTimestamp(String eventName) {
-        if (_log.shouldLog(Log.INFO)) {
+        if (_shouldTimestamp) {
             synchronized (this) {
                 locked_initTimestamps();
                 return _timestamps.get(eventName);
@@ -200,14 +199,17 @@ public class OutNetMessage implements CDPQEntry {
      *  @return the simple class name
      */
     public String getMessageType() {
-        I2NPMessage msg = _message;
-        return msg != null ? msg.getClass().getSimpleName() : "null";
+        return _message != null ? _message.getClass().getSimpleName() : "null";
     }
 
     public int getMessageTypeId() { return _messageTypeId; }
     public long getMessageId() { return _messageId; }
     
-    public long getMessageSize() {
+    /**
+     * How large the message is, including the full 16 byte header.
+     * Transports with different header sizes should adjust.
+     */
+    public int getMessageSize() {
         return _messageSize;
     }
     
@@ -371,12 +373,12 @@ public class OutNetMessage implements CDPQEntry {
             buf.append(getMessageType());
             buf.append(" ID ").append(_messageId);
         }
-        buf.append(" expiring on ").append(new Date(_expiration));
+        buf.append(" expiring ").append(new Date(_expiration));
         buf.append(" priority ").append(_priority);
         if (_failedTransports != null)
-            buf.append(" failed delivery on transports ").append(_failedTransports);
+            buf.append(" failed transports: ").append(_failedTransports);
         if (_target == null)
-            buf.append(" targetting no one in particular...");
+            buf.append(" (null target)");
         else
             buf.append(" targetting ").append(_target.getIdentity().getHash().toBase64());
         if (_onReply != null)
@@ -387,7 +389,7 @@ public class OutNetMessage implements CDPQEntry {
             buf.append(" with onFailedReply job: ").append(_onFailedReply);
         if (_onFailedSend != null)
             buf.append(" with onFailedSend job: ").append(_onFailedSend);
-        if (_timestamps != null && _timestampOrder != null && _log.shouldLog(Log.INFO)) {
+        if (_timestamps != null && _timestampOrder != null) {
             buf.append(" {timestamps: \n");
             renderTimestamps(buf);
             buf.append("}");

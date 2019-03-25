@@ -38,27 +38,27 @@ class SummaryBarRenderer {
 
     static {
         Map<String, String> aMap = new HashMap<String, String>();;
-        aMap.put("HelpAndFAQ", "Help &amp; FAQ");
-        aMap.put("I2PServices", "I2P Services");
-        aMap.put("I2PInternals", "I2P Internals");
-        aMap.put("RouterInfo", "Router Information");
-        aMap.put("ShortRouterInfo", "Short Router Information");
-        aMap.put("AdvancedRouterInfo", "Router Information (advanced)");
-        aMap.put("MemoryBar", "Memory Usage Bar");
-        aMap.put("NetworkReachability", "Network Reachability");
-        aMap.put("UpdateStatus", "Update Status");
-        aMap.put("RestartStatus", "Restart Status");
-        aMap.put("Peers", "Peers");
-        aMap.put("PeersAdvanced", "Peers (advanced)");
-        aMap.put("FirewallAndReseedStatus", "Firewall &amp; Reseed Status");
-        aMap.put("Bandwidth", "Bandwidth");
-        aMap.put("BandwidthGraph", "Bandwidth Graph (experimental)");
-        aMap.put("Tunnels", "Tunnels");
-        aMap.put("Congestion", "Congestion");
-        aMap.put("TunnelStatus", "Tunnel Status");
-        aMap.put("Destinations", "Local Tunnels");
-        aMap.put("NewsHeadings", "News &amp; Updates");
-        aMap.put("Advanced", "Advanced Console Links");
+        aMap.put("HelpAndFAQ", _x("Help &amp; FAQ"));
+        aMap.put("I2PServices", _x("I2P Services"));
+        aMap.put("I2PInternals", _x("I2P Internals"));
+        aMap.put("RouterInfo", _x("Router Information"));
+        aMap.put("ShortRouterInfo", _x("Router Information (brief)"));
+        aMap.put("AdvancedRouterInfo", _x("Router Information (advanced)"));
+        aMap.put("MemoryBar", _x("Memory Usage Bar"));
+        aMap.put("NetworkReachability", _x("Network Reachability"));
+        aMap.put("UpdateStatus", _x("Update Status"));
+        aMap.put("RestartStatus", _x("Restart Status"));
+        aMap.put("Peers", _x("Peers"));
+        aMap.put("PeersAdvanced", _x("Peers (advanced)"));
+        aMap.put("FirewallAndReseedStatus", _x("Firewall &amp; Reseed Status"));
+        aMap.put("Bandwidth", _x("Bandwidth"));
+        aMap.put("BandwidthGraph", _x("Bandwidth Graph"));
+        aMap.put("Tunnels", _x("Tunnels"));
+        aMap.put("Congestion", _x("Congestion"));
+        aMap.put("TunnelStatus", _x("Tunnel Status"));
+        aMap.put("Destinations", _x("Local Tunnels"));
+        aMap.put("NewsHeadings", _x("News &amp; Updates"));
+        aMap.put("Advanced", _x("Advanced Links"));
         SECTION_NAMES = Collections.unmodifiableMap(aMap);
     }
 
@@ -187,6 +187,12 @@ class SummaryBarRenderer {
            .append(nbsp(_t("Reachability")))
            .append("</a>\n" +
 
+                   "<a href=\"/welcome\" target=\"_top\" title=\"")
+           .append(_t("New Install Wizard"))
+           .append("\">")
+           .append(nbsp(_t("Setup")))
+           .append("</a>\n" +
+
                    "<a href=\"/help#sidebarhelp\" target=\"_top\" title=\"")
            .append(_t("An introduction to the router sidebar"))
            .append("\">")
@@ -211,31 +217,56 @@ class SummaryBarRenderer {
            .append(_t("I2P Services"))
            .append("</a></h3>\n" +
 
-                   "<hr class=\"b\"><table id=\"sb_services\"><tr><td>" +
+                   "<hr class=\"b\"><table id=\"sb_services\"><tr><td>");
 
-                   "<a href=\"/webmail\" target=\"_top\" title=\"")
+        PortMapper pm = _context.portMapper();
+        if (pm.isRegistered(PortMapper.SVC_SUSIMAIL)) {
+           buf.append("<a href=\"/webmail\" target=\"_top\" title=\"")
            .append(_t("Anonymous webmail client"))
            .append("\">")
            .append(nbsp(_t("Email")))
-           .append("</a>\n" +
+           .append("</a>\n");
+        }
 
-                   "<a href=\"/torrents\" target=\"_top\" title=\"")
+        if (pm.isRegistered(PortMapper.SVC_JSONRPC)) {
+           buf.append("<a href=\"/jsonrpc/\" target=\"_top\" title=\"")
+           .append(_t("RPC Service"))
+           .append("\">")
+           .append(nbsp(_t("I2PControl")))
+           .append("</a>\n");
+        }
+
+        if (pm.isRegistered(PortMapper.SVC_I2PSNARK)) {
+           buf.append("<a href=\"/torrents\" target=\"_top\" title=\"")
            .append(_t("Built-in anonymous BitTorrent Client"))
            .append("\">")
            .append(nbsp(_t("Torrents")))
-           .append("</a>\n" +
+           .append("</a>\n");
+        }
 
-                   "<a href=\"http://")
-           .append(_context.portMapper().getActualHost(PortMapper.SVC_EEPSITE, "127.0.0.1"))
+        int port = pm.getPort(PortMapper.SVC_EEPSITE);
+        int sslPort = pm.getPort(PortMapper.SVC_HTTPS_EEPSITE);
+        if (sslPort > 0 || port > 0) {
+           String svc;
+           if (sslPort > 0) {
+               buf.append("<a href=\"https://");
+               svc = PortMapper.SVC_HTTPS_EEPSITE;
+               port = sslPort;
+           } else {
+               buf.append("<a href=\"http://");
+               svc = PortMapper.SVC_EEPSITE;
+           }
+           buf.append(pm.getActualHost(svc, "127.0.0.1"))
            .append(':')
-           .append(_context.portMapper().getPort(PortMapper.SVC_EEPSITE, 7658))
+           .append(port)
            .append("/\" target=\"_blank\" title=\"")
            .append(_t("Local web server"))
            .append("\">")
            .append(nbsp(_t("Web Server")))
-           .append("</a>\n")
+           .append("</a>\n");
+        }
 
-           .append(NavHelper.getClientAppLinks(_context))
+        buf.append(NavHelper.getClientAppLinks(_context))
 
            .append("</td></tr></table>\n");
         return buf.toString();
@@ -249,15 +280,18 @@ class SummaryBarRenderer {
            .append(_t("I2P Internals"))
            .append("</a></h3><hr class=\"b\">\n" +
 
-                   "<table id=\"sb_internals\"><tr><td>\n" +
+                   "<table id=\"sb_internals\"><tr><td>\n");
 
-                   "<a href=\"/dns\" target=\"_top\" title=\"")
+        PortMapper pm = _context.portMapper();
+        if (pm.isRegistered(PortMapper.SVC_SUSIDNS)) {
+           buf.append("<a href=\"/dns\" target=\"_top\" title=\"")
            .append(_t("Manage your I2P hosts file here (I2P domain name resolution)"))
            .append("\">")
            .append(nbsp(_t("Addressbook")))
            .append("</a>\n");
+        }
 
-        if (!StatSummarizer.isDisabled()) {
+        if (!StatSummarizer.isDisabled(_context)) {
             buf.append("<a href=\"/graphs\" target=\"_top\" title=\"")
                .append(_t("Graph router performance"))
                .append("\">")
@@ -269,15 +303,17 @@ class SummaryBarRenderer {
            .append(_t("Router Help and FAQ"))
            .append("\">")
            .append(nbsp(_t("Help")))
-           .append("</a>\n" +
+           .append("</a>\n");
 
-                   "<a href=\"/i2ptunnelmgr\" target=\"_top\" title=\"")
+        if (pm.isRegistered(PortMapper.SVC_I2PTUNNEL)) {
+           buf.append("<a href=\"/i2ptunnelmgr\" target=\"_top\" title=\"")
            .append(_t("Local Tunnels"))
            .append("\">")
            .append(nbsp(_t("Hidden Services Manager")))
-           .append("</a>\n" +
+           .append("</a>\n");
+        }
 
-                   "<a href=\"/logs\" target=\"_top\" title=\"")
+        buf.append("<a href=\"/logs\" target=\"_top\" title=\"")
            .append(_t("Health Report"))
            .append("\">")
            .append(nbsp(_t("Logs")))
@@ -584,7 +620,7 @@ class SummaryBarRenderer {
         buf.append("<h3><a href=\"/configupdate\" target=\"_top\" title=\"")
            .append(_t("Configure I2P Updates"))
            .append("\">")
-           .append(_t("I2P Update"))
+           .append(_t("Update Status"))
            .append("</a></h3><hr class=\"b\">\n");
         buf.append(updateStatus);
         return buf.toString();
@@ -800,13 +836,14 @@ class SummaryBarRenderer {
     public String renderBandwidthGraphHTML() {
         if (_helper == null) return "";
         StringBuilder buf = new StringBuilder(512);
-        if (!StatSummarizer.isDisabled())
+        if (!StatSummarizer.isDisabled(_context)) {
             buf.append("<div id=\"sb_graphcontainer\"><a href=\"/graphs\"><table id=\"sb_bandwidthgraph\">" +
                        "<tr title=\"")
                .append(_t("Our inbound &amp; outbound traffic for the last 20 minutes"))
                .append("\"><td><span id=\"sb_graphstats\">")
                .append(_helper.getSecondKBps())
                .append("Bps</span></td></tr></table></a></div>\n");
+        }
         buf.append("<script src=\"/js/refreshGraph.js\" type=\"text/javascript\" id=\"refreshGraph\" async></script>");
         return buf.toString();
     }
@@ -990,6 +1027,11 @@ class SummaryBarRenderer {
             buf.append("</div>\n");
         }
         return buf.toString();
+    }
+
+    /** tag only */
+    private static final String _x(String s) {
+        return s;
     }
 
     /** translate a string */

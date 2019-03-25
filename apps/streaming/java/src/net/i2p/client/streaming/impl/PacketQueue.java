@@ -44,6 +44,7 @@ class PacketQueue implements SendMessageStatusListener, Closeable {
     private static final int FINAL_TAG_THRESHOLD = 2;
     private static final long REMOVE_EXPIRED_TIME = 67*1000;
     private static final boolean ENABLE_STATUS_LISTEN = true;
+    private static final long I2CP_EXPIRATION_ADJUST = Math.min(25, Connection.MIN_RESEND_DELAY / 4);
 
     public PacketQueue(I2PAppContext context, SimpleTimer2 timer) {
         _context = context;
@@ -117,10 +118,15 @@ class PacketQueue implements SendMessageStatusListener, Closeable {
             begin = _context.clock().now();
             long expires = 0;
             Connection.ResendPacketEvent rpe = (Connection.ResendPacketEvent) packet.getResendEvent();
-            if (rpe != null)
+            if (rpe != null) {
                 // we want the router to expire it a little before we do,
                 // so if we retransmit it will use a new tunnel/lease combo
-                expires = rpe.getNextSendTime() - 500;
+                // If we are really close to the timeout already,
+                // give this packet a chance to be sent,
+                // but it's likely to be dropped on the router side if we're
+                // running this far behind.
+                expires = Math.max(rpe.getNextSendTime() - I2CP_EXPIRATION_ADJUST, begin + 25);
+            }
             SendMessageOptions options = new SendMessageOptions();
             if (expires > 0)
                 options.setDate(expires);
@@ -147,6 +153,10 @@ class PacketQueue implements SendMessageStatusListener, Closeable {
                 }
                 options.setTagsToSend(sendTags);
                 options.setTagThreshold(tagThresh);
+                // CLOSE, RESET, and PING packets unlikely to have a large payload
+                // and most of the rest of the packet is
+                // uncompressible: stream ids, signature
+                options.setGzip(packet.getPayloadSize() > 50);
             } else if (packet.isFlagSet(FLAGS_INITIAL_TAGS)) {
                 if (con != null) {
                     if (con.isInbound())
@@ -167,6 +177,11 @@ class PacketQueue implements SendMessageStatusListener, Closeable {
                 }
                 options.setTagsToSend(sendTags);
                 options.setTagThreshold(tagThresh);
+                // SYN packets are likely to have compressible payload, even if
+                // conn gzip option is false (e.g. snark bitfield, HTTP headers).
+                // If they don't have a large payload, most of the rest of the packet
+                // is uncompressible: stream ids, destination and signature
+                options.setGzip(packet.getPayloadSize() > 50);
             } else {
                 if (con != null) {
                     if (con.isInbound() && con.getLifetime() < 2*60*1000)

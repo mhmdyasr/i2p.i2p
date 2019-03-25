@@ -148,7 +148,8 @@ public class ConfigClientsHelper extends HelperBase {
                 showStart = clientApp == null;
                 showStop = clientApp != null && clientApp.getState() == ClientAppState.RUNNING;
             }
-            renderForm(buf, ""+cur, ca.clientName,
+            String scur = Integer.toString(cur);
+            renderForm(buf, scur, ca.clientName,
                        // urlify, enabled
                        false, !ca.disabled,
                        // read only, preventDisable
@@ -158,7 +159,7 @@ public class ConfigClientsHelper extends HelperBase {
                        // description
                        DataHelper.escapeHTML(ca.className + ((ca.args != null) ? " " + ca.args : "")),
                        // edit
-                       allowEdit && (""+cur).equals(_edit),
+                       allowEdit && scur.equals(_edit),
                        // show edit button, show update button
                        // Don't allow edit if it's running, or else we would lose the "handle" to the ClientApp to stop it.
                        allowEdit && !showStop, false, 
@@ -169,7 +170,7 @@ public class ConfigClientsHelper extends HelperBase {
         }
         
         if (allowEdit && "new".equals(_edit))
-            renderForm(buf, "" + clients.size(), "", false, false, false, false, "", true, false, false, false, false, false);
+            renderForm(buf, Integer.toString(clients.size()), "", false, false, false, false, "", true, false, false, false, false, false);
         buf.append("</table>\n");
         return buf.toString();
     }
@@ -214,10 +215,27 @@ public class ConfigClientsHelper extends HelperBase {
             if (name.startsWith(RouterConsoleRunner.PREFIX) && name.endsWith(RouterConsoleRunner.ENABLED)) {
                 String app = name.substring(RouterConsoleRunner.PREFIX.length(), name.lastIndexOf(RouterConsoleRunner.ENABLED));
                 String val = props.getProperty(name);
-                boolean isRunning = WebAppStarter.isWebAppRunning(app);
-                renderForm(buf, app, app, !"addressbook".equals(app),
+                boolean isRunning = WebAppStarter.isWebAppRunning(_context, app);
+                String desc;
+                // use descriptions already tagged elsewhere
+                if (app.equals("routerconsole"))
+                    desc = _t("I2P Router Console");
+                else if (app.equals("i2psnark"))
+                    desc = _t("Torrents");
+                else if (app.equals("i2ptunnel"))
+                    desc = _t("Hidden Services Manager");
+                else if (app.equals("imagegen"))
+                    desc = _t("Identification Image Generator");
+                else if (app.equals("susidns"))
+                    desc = _t("Addressbook");
+                else if (app.equals("susimail"))
+                    desc = _t("Email");
+                else
+                    desc = DataHelper.escapeHTML(app) + ".war";
+                renderForm(buf, app, app,
+                           RouterConsoleRunner.ROUTERCONSOLE.equals(app) || (isRunning && !"addressbook".equals(app)),
                            "true".equals(val), RouterConsoleRunner.ROUTERCONSOLE.equals(app),
-                           RouterConsoleRunner.ROUTERCONSOLE.equals(app), DataHelper.escapeHTML(app + ".war"),
+                           RouterConsoleRunner.ROUTERCONSOLE.equals(app), desc,
                            false, false, false, isRunning, false, !isRunning);
             }
         }
@@ -333,7 +351,7 @@ public class ConfigClientsHelper extends HelperBase {
                             boolean showDeleteButton, boolean showStartButton) {
         String escapedName = DataHelper.escapeHTML(name);
         buf.append("<tr><td align=\"right\">");
-        if (urlify && enabled) {
+        if (urlify) {
             String link = "/";
             if (! RouterConsoleRunner.ROUTERCONSOLE.equals(name))
                 link += escapedName + "/";

@@ -10,17 +10,12 @@
 - Push to Transifex: `tx push -s`
 - Make announcement on Transifex with checkin deadline
 
-- GeoIP: Maxmind update is usually first week of the month, time accordingly
-- wget http://geolite.maxmind.com/download/geoip/database/GeoIPCountryCSV.zip
-- unzip GeoIPCountryCSV.zip
-- cut -d, -f3-5 < GeoIPCountryWhois.csv|sed 's/"//g' > geoip.txt
-- replace header
-- fix date in header (get date from HEAD)
-- ./makegeoipv6.sh
-- mtn ci geoip.txt geoipv6.dat.gz
+- GeoIP: Maxmind update is usually first Tuesday of the month, time accordingly
+- installer/resources/makegeoip.sh
+- mtn ci installer/resources/GeoLite2-Country.mmdb.gz
 
 - BuildTime: Don't have to do this every release, but update the
-  EARLIEST and EARLIEST_LONG values in ~/mtn/i2p/core/java/src/net/i2p/time/BuildTime.java
+  EARLIEST and EARLIEST_LONG values in core/java/src/net/i2p/time/BuildTime.java
   to the current date, more or less.
 
 - Tickets: Check if any blocker or critical tickets for this release remain open;
@@ -106,6 +101,7 @@
 6. Change revision in:
   - `history.txt`
   - `installer/install.xml`
+  - `installer/install5.xml`
   - `core/java/src/net/i2p/CoreVersion.java`
   - `router/java/src/net/i2p/router/RouterVersion.java`
     - (change to BUILD = 0 and EXTRA = "")
@@ -122,7 +118,7 @@
 9. Verify that no untrusted revisions were inadvertently blessed by a trusted party:
 
     ```
-    mtn log --brief --no-graph --to t:i2p-0.9.(xx-1) | cut -d ' ' -f 2 | sort | uniq -c
+    ant revisions
     ```
 
 ### Build and test

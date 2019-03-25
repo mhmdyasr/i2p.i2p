@@ -324,7 +324,7 @@ public class SU3File {
                 try {
                     _signerPubkey = ring.getKey(_signer, _contentType.getName(), _sigType);
                 } catch (GeneralSecurityException gse) {
-                    IOException ioe = new IOException("keystore error");
+                    IOException ioe = new IOException("Certificate error for " + _signer + ": " + gse);
                     ioe.initCause(gse);
                     throw ioe;
                 }
@@ -338,7 +338,7 @@ public class SU3File {
                         try {
                             _signerPubkey = ring.getKey(_signer, _contentType.getName(), _sigType);
                         } catch (GeneralSecurityException gse) {
-                            IOException ioe = new IOException("keystore error");
+                            IOException ioe = new IOException("Certificate error for " + _signer + ": " + gse);
                             ioe.initCause(gse);
                             throw ioe;
                         }
@@ -673,7 +673,8 @@ public class SU3File {
         for (SigType t : EnumSet.allOf(SigType.class)) {
             if (!t.isAvailable())
                 continue;
-            if (t == SigType.EdDSA_SHA512_Ed25519)
+            if (t == SigType.EdDSA_SHA512_Ed25519 ||
+                t == SigType.RedDSA_SHA512_Ed25519)
                 continue; // not supported by keytool, and does double hashing right now
             buf.append("      ").append(t).append("\t(code: ").append(t.getCode()).append(')');
             if (t.getCode() == DEFAULT_SIG_CODE)
@@ -700,7 +701,7 @@ public class SU3File {
     }
 
     /**
-     *  @param stype number or name
+     *  @param ctype number or name
      *  @return null if not found
      *  @since 0.9.9
      */

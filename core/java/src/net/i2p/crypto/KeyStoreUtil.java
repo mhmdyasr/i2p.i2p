@@ -44,11 +44,13 @@ import net.i2p.util.SystemVersion;
  */
 public final class KeyStoreUtil {
         
-    public static boolean _blacklistLogged;
+    private static boolean _blacklistLogged;
 
     public static final String DEFAULT_KEYSTORE_PASSWORD = "changeit";
     private static final String DEFAULT_KEY_ALGORITHM = "RSA";
     private static final int DEFAULT_KEY_SIZE = 2048;
+    private static final String DEFAULT_CA_KEY_ALGORITHM = "EC";
+    private static final int DEFAULT_CA_KEY_SIZE = 256;
     private static final int DEFAULT_KEY_VALID_DAYS = 3652;  // 10 years
 
     static {
@@ -398,10 +400,10 @@ public final class KeyStoreUtil {
      *  @return number successfully removed
      *  @since 0.9.24
      */
-    private static int removeBlacklistedCerts(KeyStore ks) {
+    private synchronized static int removeBlacklistedCerts(KeyStore ks) {
         if (SystemVersion.isAndroid())
             return 0;
-        int count = 0;
+        List<String> toRemove = new ArrayList<String>(4);
         try {
             MessageDigest md = SHA1.getInstance();
             for(Enumeration<String> e = ks.aliases(); e.hasMoreElements();) {
@@ -429,8 +431,7 @@ public final class KeyStoreUtil {
                             //}
                             //info("hex is: " + buf);
                             if (_blacklist.contains(new SHA1Hash(h))) {
-                                ks.deleteEntry(alias);
-                                count++;
+                                toRemove.add(alias);
                                 if (!_blacklistLogged) {
                                     // should this be a logAlways?
                                     X509Certificate xc = (X509Certificate) c;
@@ -450,9 +451,15 @@ public final class KeyStoreUtil {
                 }
             }
         } catch (GeneralSecurityException e) {}
-        if (count > 0)
+        if (!toRemove.isEmpty()) {
             _blacklistLogged = true;
-        return count;
+            for (String alias : toRemove) {
+                try {
+                    ks.deleteEntry(alias);
+                } catch (GeneralSecurityException e) {}
+            }
+        }
+        return toRemove.size();
     }
 
     /**
@@ -565,6 +572,9 @@ public final class KeyStoreUtil {
      *  Create a keypair and store it in the keystore at ks, creating it if necessary.
      *  Use default keystore password, valid days, algorithm, and key size.
      *
+     *  As of 0.9.35, default algorithm and size depends on cname. If it appears to be
+     *  a CA, it will use EC/256. Otherwise, it will use RSA/2048.
+     *
      *  Warning, may take a long time.
      *
      *  @param ks path to the keystore
@@ -578,13 +588,20 @@ public final class KeyStoreUtil {
      */
     public static boolean createKeys(File ks, String alias, String cname, String ou,
                                      String keyPW) {
+        final boolean isCA = !cname.contains("@") && !cname.endsWith(".family.i2p.net") &&
+                             SigType.ECDSA_SHA256_P256.isAvailable();
+        final String alg = isCA ? DEFAULT_CA_KEY_ALGORITHM : DEFAULT_KEY_ALGORITHM;
+        final int sz = isCA ? DEFAULT_CA_KEY_SIZE : DEFAULT_KEY_SIZE;
         return createKeys(ks, DEFAULT_KEYSTORE_PASSWORD, alias, cname, null, ou,
-                          DEFAULT_KEY_VALID_DAYS, DEFAULT_KEY_ALGORITHM, DEFAULT_KEY_SIZE, keyPW);
+                          DEFAULT_KEY_VALID_DAYS, alg, sz, keyPW);
     }
 
     /**
      *  Create a keypair and store it in the keystore at ks, creating it if necessary.
      *  Use default keystore password, valid days, algorithm, and key size.
+     *
+     *  As of 0.9.35, default algorithm and size depends on cname. If it appears to be
+     *  a CA, it will use EC/256. Otherwise, it will use RSA/2048.
      *
      *  Warning, may take a long time.
      *
@@ -601,8 +618,12 @@ public final class KeyStoreUtil {
      */
     public static boolean createKeys(File ks, String alias, String cname, Set<String> altNames, String ou,
                                      String keyPW) {
+        final boolean isCA = !cname.contains("@") && !cname.endsWith(".family.i2p.net") &&
+                             SigType.ECDSA_SHA256_P256.isAvailable();
+        final String alg = isCA ? DEFAULT_CA_KEY_ALGORITHM : DEFAULT_KEY_ALGORITHM;
+        final int sz = isCA ? DEFAULT_CA_KEY_SIZE : DEFAULT_KEY_SIZE;
         return createKeys(ks, DEFAULT_KEYSTORE_PASSWORD, alias, cname, altNames, ou,
-                          DEFAULT_KEY_VALID_DAYS, DEFAULT_KEY_ALGORITHM, DEFAULT_KEY_SIZE, keyPW);
+                          DEFAULT_KEY_VALID_DAYS, alg, sz, keyPW);
     }
 
     /**
@@ -1235,7 +1256,7 @@ public final class KeyStoreUtil {
      *   Usage: KeyStoreUtil (loads from system keystore)
      *          KeyStoreUtil foo.ks (loads from system keystore, and from foo.ks keystore if exists, else creates empty)
      *          KeyStoreUtil certDir (loads from system keystore and all certs in certDir if exists)
-     *          KeyStoreUtil import file.ks file.key alias keypw (imxports private key from file to keystore)
+     *          KeyStoreUtil import file.ks file.key alias keypw (imports private key from file to keystore)
      *          KeyStoreUtil export file.ks alias keypw (exports private key from keystore)
      *          KeyStoreUtil keygen file.ks alias keypw (create keypair in keystore)
      *          KeyStoreUtil keygen2 file.ks alias keypw (create keypair using I2PProvider)
@@ -1310,8 +1331,8 @@ public final class KeyStoreUtil {
         String alias = args[2];
         String pw = args[3];
         boolean ok = createKeys(ksf, DEFAULT_KEYSTORE_PASSWORD, alias, "test cname", "test ou",
-                                //DEFAULT_KEY_VALID_DAYS, "EdDSA", 256, pw);
-                                DEFAULT_KEY_VALID_DAYS, "ElGamal", 2048, pw);
+                                DEFAULT_KEY_VALID_DAYS, "EdDSA", 256, pw);
+                                //DEFAULT_KEY_VALID_DAYS, "ElGamal", 2048, pw);
         System.out.println("genkey ok? " + ok);
     }
 

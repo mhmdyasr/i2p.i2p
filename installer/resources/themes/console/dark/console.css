@@ -1,6 +1,5 @@
 /* I2P Theme: Camo aka Dark */
 /* Description: Military Grade. */
-/* Comment: Thanks to Florian Kuhlmann for the hatface images. [http://www.flickr.com/photos/floriankuhlmann/] */
 /* Author: dr|z3d */
 
 body {
@@ -1686,9 +1685,12 @@ a:active tt {
      color: #f90;
 }
 
+.main ul {
+     list-style-type: square;
+}
+
 div.main li {
      text-align: left;
-     list-style: square;
      margin: 2px 0 2px 30px;
      padding: 2px 20px 2px 0;
      word-wrap: break-word;
@@ -2977,10 +2979,6 @@ tr#addnew, tr#addnew:hover {
      position: relative;
      top: 8px;
      padding: 5px 10px 8px 5px;
-}
-
-#themeoptions br {
-     display: none;
 }
 
 #themeoptions label {
@@ -4498,7 +4496,6 @@ table[id$="logs"] ul {
      font: bold 8.5pt "Droid Sans Mono",  "Lucida Console", "DejaVu Sans Mono", monospace;
      line-height: 120%;
      text-align: left;
-     display: inline-block;
      width: 100%;
      word-break: break-all;
 }
@@ -7253,9 +7250,11 @@ td.optionsave {
 }
 
 .main#help #changelog pre:not(old) {
+/*
      columns: 550px auto;
      column-gap: 40px;
      column-rule: 1px dotted #151;
+*/
      margin-left: 0;
      padding-left: 10px;
      width: calc(100% - 22px) !important;

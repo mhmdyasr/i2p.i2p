@@ -36,6 +36,7 @@ import net.i2p.util.I2PAppThread;
 import net.i2p.util.Log;
 import net.i2p.util.PortMapper;
 import net.i2p.util.SimpleTimer2;
+import net.i2p.util.SystemVersion;
 import net.i2p.util.Translate;
 import net.i2p.util.VersionComparator;
 
@@ -58,7 +59,7 @@ public class PluginStarter implements Runnable {
     public static final String ENABLED = ".startOnLoad";
     public static final String DELETED = "deleted";
     public static final String PLUGIN_DIR = "plugins";
-    private static final String[] STANDARD_WEBAPPS = { "i2psnark", "i2ptunnel", "susidns",
+    private static final String[] STANDARD_WEBAPPS = { "i2psnark", "i2ptunnel", "imagegen", "susidns",
                                                        "susimail", "addressbook", "routerconsole" };
     private static final String[] STANDARD_THEMES = { "images", "light", "dark", "classic",
                                                       "midnight" };
@@ -78,10 +79,26 @@ public class PluginStarter implements Runnable {
     public static final Map<String, String> jetty9Blacklist;
 
     static {
-        Map<String, String> map = new HashMap<String, String>(4);
+        Map<String, String> map = new HashMap<String, String>(2);
         map.put("i2pbote", "0.4.5");
         map.put("BwSchedule", "0.0.36");
         jetty9Blacklist = Collections.unmodifiableMap(map);
+    }
+
+    /**
+     *  Plugin name to plugin version of plugins that do not work
+     *  with Java 9+
+     *  Unmodifiable.
+     *
+     *  @since 0.9.30
+     */
+    public static final Map<String, String> java9Blacklist;
+
+    static {
+        Map<String, String> map = new HashMap<String, String>(2);
+        map.put("01_neodatis", "2.1-2.14-209-17");
+        map.put("02_seedless", "0.1.7-0.1.12");
+        java9Blacklist = Collections.unmodifiableMap(map);
     }
 
     public PluginStarter(RouterContext ctx) {
@@ -172,7 +189,7 @@ public class PluginStarter implements Runnable {
         int proxyPort = ConfigUpdateHandler.proxyPort(ctx);
         if (proxyPort == ConfigUpdateHandler.DEFAULT_PROXY_PORT_INT &&
             proxyHost.equals(ConfigUpdateHandler.DEFAULT_PROXY_HOST) &&
-            ctx.portMapper().getPort(PortMapper.SVC_HTTP_PROXY) < 0) {
+            !ctx.portMapper().isRegistered(PortMapper.SVC_HTTP_PROXY)) {
             mgr.notifyComplete(null, Messages.getString("Plugin update check failed", ctx) +
                                      " - " +
                                      Messages.getString("HTTP client proxy tunnel must be running", ctx));
@@ -362,6 +379,18 @@ public class PluginStarter implements Runnable {
             throw new Exception(foo);
         }
 
+        if (SystemVersion.isJava9()) {
+            blacklistVersion = java9Blacklist.get(appName);
+            if (blacklistVersion != null &&
+                VersionComparator.comp(curVersion, blacklistVersion) <= 0) {
+                String foo = "Plugin " + appName + " requires Jetty version 8.9999 or lower";
+                log.error(foo);
+                disablePlugin(appName);
+                foo = gettext("Plugin requires Java version {0} or lower", "8.9999", ctx);
+                throw new Exception(foo);
+            }
+        }
+
         String maxVersion = stripHTML(props, "max-jetty-version");
         if (maxVersion != null &&
             VersionComparator.comp(maxVersion, jVersion) < 0) {
@@ -411,7 +440,7 @@ public class PluginStarter implements Runnable {
         }
 
         // start console webapps in console/webapps
-        ContextHandlerCollection server = WebAppStarter.getConsoleServer();
+        ContextHandlerCollection server = WebAppStarter.getConsoleServer(ctx);
         if (server != null) {
             File consoleDir = new File(pluginDir, "console");
             Properties wprops = RouterConsoleRunner.webAppProperties(consoleDir.getAbsolutePath());
@@ -541,7 +570,7 @@ public class PluginStarter implements Runnable {
                 Iterator <String> wars = pluginWars.get(appName).iterator();
                 while (wars.hasNext()) {
                     String warName = wars.next();
-                    WebAppStarter.stopWebApp(warName);
+                    WebAppStarter.stopWebApp(ctx, warName);
                 }
                 pluginWars.get(appName).clear();
             }
@@ -922,7 +951,7 @@ public class PluginStarter implements Runnable {
             Iterator <String> it = pluginWars.get(pluginName).iterator();
             while(it.hasNext() && !isWarRunning) {
                 String warName = it.next();
-                if(WebAppStarter.isWebAppRunning(warName)) {
+                if(WebAppStarter.isWebAppRunning(ctx, warName)) {
                     isWarRunning = true;
                 }
             }

@@ -12,23 +12,15 @@ body {
      color: #33333f;
      font-size: 9pt;
      line-height: 130%;
-     background: #a4a4cb url(images/tile2.png) fixed;
-     background-size: 32px 32px;
+     background: linear-gradient(135deg, #9dabd5 0%,#265ea7 53%,#222187 76%,#323638 100%);
+     background: -webkit-linear-gradient(-45deg, #9dabd5 0%,#265ea7 53%,#222187 76%,#323638 100%);
 }
 
 /* preload button mouseovers */
 
 body {
-     background: url(images/tile2.png),
-     url(/themes/console/images/buttons/clean_hover.png) no-repeat,
-     url(/themes/console/images/buttons/configure_hover.png) no-repeat,
-     url(/themes/console/images/buttons/delete_hover.png) no-repeat,
-     url(/themes/console/images/buttons/restart_hover.png) no-repeat,
-     url(/themes/console/images/buttons/restore_hover.png) no-repeat,
-     url(/themes/console/images/buttons/search_hover.png) no-repeat,
-     url(/themes/console/images/buttons/shutdown_hover.png) no-repeat,
-     url(/themes/console/images/buttons/update_hover.png) no-repeat, #a4a4cb;
-     background-size: 32px 32px, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0;
+    background: linear-gradient(135deg, #9dabd5 0%,#265ea7 53%,#222187 76%,#323638 100%);
+    background: -webkit-linear-gradient(-45deg, #9dabd5 0%,#265ea7 53%,#222187 76%,#323638 100%);
 }
 
 @supports (text-justify: auto) { /* Firefox 55+ */
@@ -1349,8 +1341,8 @@ p:empty + .sb_notice {
 }
 
 .news, .main#news, .main#proof, .main#oldconsole, #warning2 {
-     background: #f8f8ff url(/themes/snark/ubergine/images/hat.png) no-repeat scroll right bottom;
-     background: linear-gradient(to bottom, rgba(248,248,255,0.5), rgba(240,240,255,0.5)), url(/themes/snark/ubergine/images/hat.png) no-repeat right bottom, repeating-linear-gradient(135deg, rgba(255,255,255,0.5) 2px, rgba(221, 221, 255, 0.3) 3px, #fff 5px) #f8f8ff !important;
+     background: #f8f8ff;
+     background: linear-gradient(to bottom, rgba(248,248,255,0.5), rgba(240,240,255,0.5)), repeating-linear-gradient(135deg, rgba(255,255,255,0.5) 2px, rgba(221, 221, 255, 0.3) 3px, #fff 5px) #f8f8ff !important;
      background-size: 100% 100%, auto 160px, 100% 100% !important;
 }
 
@@ -2180,7 +2172,7 @@ h3#graphdisplay {
      border-radius: 2px;
      border: 1px solid #7778bf;
      background: #eef;
-     background: url(/themes/snark/ubergine/images/hat.png) bottom right no-repeat, linear-gradient(to right, #fafaff, #eef);
+     background: linear-gradient(to right, #fafaff, #eef);
      background-size: auto 100%, 100% 100%;
      font-weight: bold;
      box-shadow: inset 0 0 0 1px #fff;
@@ -2189,7 +2181,7 @@ h3#graphdisplay {
 }
 
 .main#config_update .messages {
-     background: url(/themes/console/images/info/newspaper.png) 12px center no-repeat, url(/themes/snark/ubergine/images/hat.png) bottom right no-repeat, linear-gradient(135deg, #fafaff, #f8f8ff);
+     background: url(/themes/console/images/info/newspaper.png) 12px center no-repeat, linear-gradient(135deg, #fafaff, #f8f8ff);
      padding: 15px 15px 15px 50px;
      background-size: 28px 28px, auto 100%, 100% 100% !important;
 }
@@ -2361,7 +2353,6 @@ table#wrapperlogs {
      font-size: 8.5pt;
      line-height: 130%;
      text-align: left;
-     display: inline-block;
      width: calc(100% - 48px);
      padding-top: 1px !important;
 }
@@ -2418,7 +2409,7 @@ table#wrapperlogs {
 }
 
 #enviro, table[id$="logs"] {
-     font-size: 9pt !important;
+     font-size: 8pt !important;
      padding: 10px;
 }
 
@@ -2430,8 +2421,8 @@ table#wrapperlogs {
 }
 
 #enviro td {
-     padding-top: 5px;
-     padding-bottom: 5px;
+     padding-top: 4px;
+     padding-bottom: 4px;
 }
 
 #enviro:hover td {
@@ -2818,9 +2809,12 @@ tt::-moz-selection {
      background: #030 !important;
 }
 
+.main ul {
+     list-style-type: square;
+}
+
 .main li {
      text-align: left;
-     list-style: square;
      margin: 2px 20px 0 40px;
      padding: 1px 10px 1px 10px;
      line-height: 150%;
@@ -3975,6 +3969,16 @@ input.go[value^="Create"]:focus, button.go[value^="Create"]:focus {
      background: url(/themes/console/images/buttons/create-file.png) no-repeat 6px center, linear-gradient(to bottom, #eee, #fff);
 }
 
+input.back {
+     background: url(/themes/console/images/buttons/back.png) no-repeat 6px center, linear-gradient(to bottom, #fff, #efefff);
+     padding: 5px 7px 5px 22px;
+}
+
+input.back:hover,
+input.back:focus {
+     background: url(/themes/console/images/buttons/back.png) no-repeat 6px center, linear-gradient(to bottom, #eee, #fff);
+}
+
 input.reload, button.reload {
      background: url(/themes/console/images/buttons/restore.png) no-repeat 6px center, linear-gradient(to bottom, #fff, #efefff);
      padding: 5px 7px 5px 22px;
@@ -4705,10 +4709,6 @@ body.iframed {
      position: relative;
      top: 4px;
      padding: 5px 10px 5px 5px;
-}
-
-#themeoptions br {
-     display: none;
 }
 
 #themeoptions label {
@@ -6228,7 +6228,7 @@ h3#ntcpcon, h3#udpcon {
 }
 
 #help #volunteer, #wrapperlogs pre {
-     background: linear-gradient(to bottom, #fafaff, rgba(248,248,255,0.3)), url(/themes/snark/ubergine/images/hat.png) no-repeat right -3px bottom -3px / auto 80%, repeating-linear-gradient(135deg, rgba(252,252,255,0.5) 2px, rgba(221, 221, 255, 0.3) 3px, #fafaff 5px) #fafaff !important;
+     background: linear-gradient(to bottom, #fafaff, rgba(248,248,255,0.3)), repeating-linear-gradient(135deg, rgba(252,252,255,0.5) 2px, rgba(221, 221, 255, 0.3) 3px, #fafaff 5px) #fafaff !important;
      box-shadow: inset 0 0 0 1px #fff;
 }
 
@@ -7529,9 +7529,11 @@ body {
 
 @media screen and (min-width: 1400px) {
 #help #changelog pre:not(old) {
+/*
      columns: 550px auto;
      column-gap: 25px;
      column-rule: 1px solid rgba(64, 64, 128, 0.5);
+*/
      margin-left: -10px !important;
      padding-left: 10px;
      padding-bottom: 5px;
@@ -7950,8 +7952,8 @@ th.options {
 }
 
 #enviro td {
-     padding-top: 6px;
-     padding-bottom: 6px;
+     padding-top: 4px;
+     padding-bottom: 4px;
 }
 
 #enviro td:last-child b {
@@ -8110,7 +8112,7 @@ to {
 }
 
 #help #volunteer {
-     background: #f3f3ff url(/themes/snark/ubergine/images/hat.png) no-repeat right -3px bottom -3px !important;
+     background: #f3f3ff !important;
      background-size: auto 80%;
 }
 
@@ -8132,4 +8134,3 @@ th.options .optbox {
 }
 
 /* end chrome overrides */
-

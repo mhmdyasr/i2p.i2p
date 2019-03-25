@@ -88,6 +88,10 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
     private static final int MAX_HEADERS = 60;
     /** Includes request, just to prevent OOM DOS @since 0.9.20 */
     private static final int MAX_TOTAL_HEADER_SIZE = 32*1024;
+    // Does not apply to header reads.
+    // We set it to forever so that it won't timeout when sending a large response.
+    // The server will presumably have its own timeout implemented for POST
+    private static final long DEFAULT_HTTP_READ_TIMEOUT = -1;
     
     private long _startedOn = 0L;
     private ConnThrottler _postThrottler;
@@ -205,6 +209,7 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
     private void setupI2PTunnelHTTPServer(String spoofHost) {
         _spoofHost = (spoofHost != null && spoofHost.trim().length() > 0) ? spoofHost.trim() : null;
         getTunnel().getContext().statManager().createRateStat("i2ptunnel.httpserver.blockingHandleTime", "how long the blocking handle takes to complete", "I2PTunnel.HTTPServer", new long[] { 60*1000, 10*60*1000, 3*60*60*1000 });
+        readTimeout = DEFAULT_HTTP_READ_TIMEOUT;
     }
 
     @Override
@@ -225,7 +230,7 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
                 long pb = 1000L * getIntOption(OPT_POST_BAN_TIME, DEFAULT_POST_BAN_TIME);
                 long px = 1000L * getIntOption(OPT_POST_TOTAL_BAN_TIME, DEFAULT_POST_TOTAL_BAN_TIME);
                 if (_postThrottler == null)
-                    _postThrottler = new ConnThrottler(pp, pt, pw, pb, px, "POST", _log);
+                    _postThrottler = new ConnThrottler(pp, pt, pw, pb, px, "POST/PUT", _log);
                 else
                     _postThrottler.updateLimits(pp, pt, pw, pb, px);
             }
@@ -476,10 +481,11 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
 
             if (_postThrottler != null &&
                 command.length() >= 5 &&
-                command.substring(0, 5).toUpperCase(Locale.US).equals("POST ")) {
+                (command.substring(0, 5).toUpperCase(Locale.US).equals("POST ") ||
+                 command.substring(0, 4).toUpperCase(Locale.US).equals("PUT "))) {
                 if (_postThrottler.shouldThrottle(peerHash)) {
                     if (_log.shouldLog(Log.WARN))
-                        _log.warn("Refusing POST since peer is throttled: " + peerB32);
+                        _log.warn("Refusing POST/PUT since peer is throttled: " + peerB32);
                     try {
                         // Send a 429, so the user doesn't get an HTTP Proxy error message
                         // and blame his router or the network.
@@ -510,7 +516,12 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
             }
             if (spoofHost != null)
                 setEntry(headers, "Host", spoofHost);
-            setEntry(headers, "Connection", "close");
+
+            // Force Connection: close, unless websocket
+            String conn = getEntryOrNull(headers, "Connection");
+            if (conn == null || !conn.toLowerCase(Locale.US).contains("upgrade"))
+                setEntry(headers, "Connection", "close");
+
             // we keep the enc sent by the browser before clobbering it, since it may have 
             // been x-i2p-gzip
             String enc = getEntryOrNull(headers, "Accept-Encoding");
@@ -636,7 +647,8 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
                     _log.info("request headers: " + _headers);
                 serverout.write(DataHelper.getUTF8(_headers));
                 browserin = _browser.getInputStream();
-                // Don't spin off a thread for this except for POSTs
+                // Don't spin off a thread for this except for POSTs and PUTs
+                // TODO Upgrade:
                 // beware interference with Shoutcast, etc.?
                 if ((!(_headers.startsWith("GET ") || _headers.startsWith("HEAD "))) ||
                     browserin.available() > 0) {  // just in case
@@ -815,6 +827,8 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
         @Override
         protected boolean shouldCompress() {
             return (_dataExpected < 0 || _dataExpected >= MIN_TO_COMPRESS) &&
+                   // must be null as we write the header in finishHeaders(), can't have two
+                   (_contentEncoding == null) &&
                    (_contentType == null ||
                     ((!_contentType.startsWith("audio/")) &&
                      (!_contentType.startsWith("image/")) &&
@@ -825,17 +839,12 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
                      (!_contentType.equals("application/x-bzip")) &&
                      (!_contentType.equals("application/x-bzip2")) &&
                      (!_contentType.equals("application/x-gzip")) &&
-                     (!_contentType.equals("application/zip")))) &&
-                   (_contentEncoding == null ||
-                    ((!_contentEncoding.equals("gzip")) &&
-                     (!_contentEncoding.equals("compress")) &&
-                     (!_contentEncoding.equals("deflate"))));
+                     (!_contentType.equals("application/zip"))));
         }
 
         @Override
         protected void finishHeaders() throws IOException {
-            //if (_log.shouldLog(Log.INFO))
-            //    _log.info("Including x-i2p-gzip as the content encoding in the response");
+            // TODO if browser supports gzip, send as gzip
             if (shouldCompress())
                 out.write(DataHelper.getASCII("Content-Encoding: x-i2p-gzip\r\n"));
             super.finishHeaders();
@@ -1040,6 +1049,8 @@ public class I2PTunnelHTTPServer extends I2PTunnelServer {
                     name = "User-Agent";
                 else if ("referer".equals(lcName))
                     name = "Referer";
+                else if ("connection".equals(lcName))
+                    name = "Connection";
 
                 // For incoming, we remove certain headers to prevent spoofing.
                 // For outgoing, we remove certain headers to improve anonymity.

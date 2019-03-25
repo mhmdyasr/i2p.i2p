@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.jar.Attributes;
 
 import net.i2p.I2PAppContext;
 import net.i2p.crypto.SigType;
@@ -96,29 +97,47 @@ public class LogsHelper extends HelperBase {
             return "<p>" + _t("File location") + ": <a href=\"/wrapper.log\" target=\"_blank\">" + f.getAbsolutePath() + "</a></p></td></tr>\n<tr><td><pre id=\"servicelogs\">" + str + "</pre>";
         }
     }
-    
-    /*****  unused
-    public String getConnectionLogs() {
-        return formatMessages(_context.commSystem().getMostRecentErrorMessages());
+   
+    /**
+     * @since 0.9.35
+     */
+    public String getBuiltBy() {
+        File baseDir = _context.getBaseDir();
+        File f = new File(new File(baseDir, "lib"), "i2p.jar");
+        Attributes att = FileDumpHelper.attributes(f);
+        if (att != null) {
+            String s = FileDumpHelper.getAtt(att, "Built-By");
+            if (s != null) {
+                return s;
+            }
+        }
+        return "Undefined";
     }
-    ******/
-
+    
     private final static String NL = System.getProperty("line.separator");
 
-    /** formats in reverse order */
+    /** formats in forward order */
     private String formatMessages(List<String> msgs) {
         if (msgs.isEmpty())
             return "</td></tr><tr><td><p><i>" + _t("No log messages") + "</i></p>";
         boolean colorize = _context.getBooleanPropertyDefaultTrue("routerconsole.logs.color");
         StringBuilder buf = new StringBuilder(16*1024); 
         buf.append("</td></tr><tr><td><ul>");
-        for (int i = msgs.size() - 1; i >= 0; i--) { 
+        // newest first
+        // for (int i = msgs.size() - 1; i >= 0; i--) { 
+        // oldest first
+        boolean displayed = false;
+        for (int i = 0; i < msgs.size(); i++) { 
             String msg = msgs.get(i);
             // don't display the dup message if it is last
-            if (i == 0 && msg.contains("&darr;"))
-                break;
+            //if (i == 0 && msg.contains("&darr;"))
+            // don't display the dup message if it is first
+            if (!displayed && msg.contains("&uarr;"))
+                continue;
+            displayed = true;
             msg = msg.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-            msg = msg.replace("&amp;darr;", "&darr;");  // hack - undo the damage (LogWriter)
+            //msg = msg.replace("&amp;darr;", "&darr;");  // hack - undo the damage (LogWriter)
+            msg = msg.replace("&amp;uarr;", "&uarr;");  // hack - undo the damage (LogWriter)
             // remove  last \n that LogRecordFormatter added
             if (msg.endsWith(NL))
                 msg = msg.substring(0, msg.length() - NL.length());

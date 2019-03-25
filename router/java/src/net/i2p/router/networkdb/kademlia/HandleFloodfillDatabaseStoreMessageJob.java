@@ -14,6 +14,7 @@ import java.util.Date;
 import net.i2p.data.DatabaseEntry;
 import net.i2p.data.Hash;
 import net.i2p.data.LeaseSet;
+import net.i2p.data.LeaseSet2;
 import net.i2p.data.TunnelId;
 import net.i2p.data.router.RouterAddress;
 import net.i2p.data.router.RouterIdentity;
@@ -33,7 +34,7 @@ import net.i2p.util.Log;
  * Receive DatabaseStoreMessage data and store it in the local net db
  *
  */
-public class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
+class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
     private final Log _log;
     private final DatabaseStoreMessage _message;
     private final RouterIdentity _from;
@@ -69,7 +70,8 @@ public class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
         RouterInfo prevNetDb = null;
         Hash key = _message.getKey();
         DatabaseEntry entry = _message.getEntry();
-        if (entry.getType() == DatabaseEntry.KEY_TYPE_LEASESET) {
+        int type = entry.getType();
+        if (DatabaseEntry.isLeaseSet(type)) {
             getContext().statManager().addRateData("netDb.storeLeaseSetHandled", 1);
             if (_log.shouldLog(Log.INFO))
                 _log.info("Handling dbStore of leaseset " + _message);
@@ -112,10 +114,19 @@ public class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
                 } else if (match.getEarliestLeaseDate() < ls.getEarliestLeaseDate()) {
                     wasNew = true;
                     // If it is in our keyspace and we are talking to it
-
-
                     if (match.getReceivedAsPublished())
                         ls.setReceivedAsPublished(true);
+                } else if (type != DatabaseEntry.KEY_TYPE_LEASESET &&
+                           match.getType() != DatabaseEntry.KEY_TYPE_LEASESET) {
+                    LeaseSet2 ls2 = (LeaseSet2) ls;
+                    LeaseSet2 match2 = (LeaseSet2) match;
+                    if (match2.getPublished() < ls2.getPublished()) {
+                        wasNew = true;
+                        if (match.getReceivedAsPublished())
+                            ls.setReceivedAsPublished(true);
+                    } else {
+                        wasNew = false;
+                    }
                 } else {
                     wasNew = false;
                     // The FloodOnlyLookupSelector goes away after the first good reply
@@ -135,7 +146,7 @@ public class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
             } catch (IllegalArgumentException iae) {
                 invalidMessage = iae.getMessage();
             }
-        } else if (entry.getType() == DatabaseEntry.KEY_TYPE_ROUTERINFO) {
+        } else if (type == DatabaseEntry.KEY_TYPE_ROUTERINFO) {
             RouterInfo ri = (RouterInfo) entry;
             getContext().statManager().addRateData("netDb.storeRouterInfoHandled", 1);
             if (_log.shouldLog(Log.INFO))
@@ -181,7 +192,7 @@ public class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
             }
         } else {
             if (_log.shouldLog(Log.ERROR))
-                _log.error("Invalid DatabaseStoreMessage data type - " + entry.getType() 
+                _log.error("Invalid DatabaseStoreMessage data type - " + type
                            + ": " + _message);
             // don't ack or flood
             return;
@@ -227,7 +238,7 @@ public class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
                     return;
                 }
                 long floodBegin = System.currentTimeMillis();
-                _facade.flood(_message.getEntry());
+                _facade.flood(entry);
                 // ERR: see comment in HandleDatabaseLookupMessageJob regarding hidden mode
                 //else if (!_message.getRouterInfo().isHidden())
                 long floodEnd = System.currentTimeMillis();
@@ -251,7 +262,7 @@ public class HandleFloodfillDatabaseStoreMessageJob extends JobImpl {
         TunnelId replyTunnel = _message.getReplyTunnel();
         // A store of our own RI, only if we are not FF
         DatabaseStoreMessage msg2;
-        if ((getContext().netDb().floodfillEnabled() && !getContext().router().gracefulShutdownInProgress()) ||
+        if (getContext().netDb().floodfillEnabled() ||
             storedKey.equals(getContext().routerHash())) {
             // don't send our RI if the store was our RI (from PeerTestJob)
             msg2 = null;

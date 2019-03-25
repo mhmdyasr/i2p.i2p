@@ -64,6 +64,8 @@ class InboundEstablishState {
     private int _createdSentCount;
     // default true
     private boolean _introductionRequested = true;
+
+    private int _rtt;
     
     public enum InboundState {
         /** nothin known yet */
@@ -97,7 +99,7 @@ class InboundEstablishState {
      *                   SessionCreated message will be bad if the external port != the internal port.
      */
     public InboundEstablishState(RouterContext ctx, byte remoteIP[], int remotePort, int localPort,
-                                 DHSessionKeyBuilder dh) {
+                                 DHSessionKeyBuilder dh, UDPPacketReader.SessionRequestReader req) {
         _context = ctx;
         _log = ctx.logManager().getLog(InboundEstablishState.class);
         _aliceIP = remoteIP;
@@ -108,6 +110,7 @@ class InboundEstablishState {
         _establishBegin = ctx.clock().now();
         _keyBuilder = dh;
         _queuedMessages = new LinkedBlockingQueue<OutNetMessage>();
+        receiveSessionRequest(req);
     }
     
     public synchronized InboundState getState() { return _currentState; }
@@ -180,7 +183,11 @@ class InboundEstablishState {
      */
     public synchronized void generateSessionKey() throws DHSessionKeyBuilder.InvalidPublicParameterException {
         if (_sessionKey != null) return;
-        _keyBuilder.setPeerPublicValue(_receivedX);
+        try {
+            _keyBuilder.setPeerPublicValue(_receivedX);
+        } catch (IllegalStateException ise) {
+            throw new DHSessionKeyBuilder.InvalidPublicParameterException("reused keys?", ise);
+        }
         _sessionKey = _keyBuilder.getSessionKey();
         ByteArray extra = _keyBuilder.getExtraBytes();
         _macKey = new SessionKey(new byte[SessionKey.KEYSIZE_BYTES]);
@@ -284,7 +291,14 @@ class InboundEstablishState {
     /** how long have we been trying to establish this session? */
     public long getLifetime() { return _context.clock().now() - _establishBegin; }
     public long getEstablishBeginTime() { return _establishBegin; }
+
+    /**
+     *  @return rcv time after receiving a packet (including after constructor),
+     *          send time + delay after sending a packet
+     */
     public synchronized long getNextSendTime() { return _nextSend; }
+
+    synchronized int getRTT() { return _rtt; }
 
     /** RemoteHostId, uniquely identifies an attempt */
     RemoteHostId getRemoteHostId() { return _remoteHostId; }
@@ -346,6 +360,10 @@ class InboundEstablishState {
                 _currentState = InboundState.IB_STATE_CONFIRMED_PARTIALLY;
         }
         
+        if (_createdSentCount == 1) {
+            _rtt = (int) ( _context.clock().now() - _lastSend );
+        }	
+
         packetReceived();
     }
     
@@ -474,6 +492,9 @@ class InboundEstablishState {
             }
     }
     
+    /**
+     *  Call from synchronized method only
+     */
     private void packetReceived() {
         _nextSend = _context.clock().now();
     }

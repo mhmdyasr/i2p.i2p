@@ -83,7 +83,7 @@ public abstract class TransportImpl implements Transport {
      */
     public TransportImpl(RouterContext context) {
         _context = context;
-        _log = _context.logManager().getLog(TransportImpl.class);
+        _log = _context.logManager().getLog(getClass());
 
         _context.statManager().createRateStat("transport.sendMessageFailureLifetime", "How long the lifetime of messages that fail are?", "Transport", new long[] { 60*1000l, 10*60*1000l, 60*60*1000l, 24*60*60*1000l });
         _context.statManager().createRequiredRateStat("transport.sendMessageSize", "Size of sent messages (bytes)", "Transport", new long[] { 60*1000l, 5*60*1000l, 60*60*1000l, 24*60*60*1000l });
@@ -450,12 +450,9 @@ public abstract class TransportImpl implements Transport {
      * @param remoteIdentHash may be null, calculated from remoteIdent if null
      */
     public void messageReceived(I2NPMessage inMsg, RouterIdentity remoteIdent, Hash remoteIdentHash, long msToReceive, int bytesReceived) {
-        //if (true)
-        //    _log.error("(not error) I2NP message received: " + inMsg.getUniqueId() + " after " + msToReceive);
-
         int level = Log.INFO;
-        if (msToReceive > 5000)
-            level = Log.WARN;
+        //if (msToReceive > 5000)
+        //    level = Log.WARN;
         if (_log.shouldLog(level)) {
             StringBuilder buf = new StringBuilder(128);
             buf.append("Message received: ").append(inMsg.getClass().getSimpleName());
@@ -470,10 +467,6 @@ public abstract class TransportImpl implements Transport {
             } else {
                 buf.append("[unknown]");
             }
-            buf.append(" and forwarding to listener: ");
-            if (_listener != null)
-                buf.append(_listener);
-
             _log.log(level, buf.toString());
         }
 
@@ -519,6 +512,9 @@ public abstract class TransportImpl implements Transport {
     /**
      *  What address are we currently listening to?
      *  Replaces getCurrentAddress()
+     *
+     *  Note: An address without a host is considered IPv4.
+     *
      *  @param ipv6 true for IPv6 only; false for IPv4 only
      *  @return first matching address or null
      *  @since IPv6
@@ -660,45 +656,54 @@ public abstract class TransportImpl implements Transport {
      *  @since IPv6
      */
     protected List<RouterAddress> getTargetAddresses(RouterInfo target) {
-        List<RouterAddress> rv = target.getTargetAddresses(getStyle());
+        List<RouterAddress> rv;
+        String alt = getAltStyle();
+        if (alt != null)
+            rv = target.getTargetAddresses(getStyle(), alt);
+        else
+            rv = target.getTargetAddresses(getStyle());
         if (rv.isEmpty())
             return rv;
-        // Shuffle so everybody doesn't use the first one
-        if (rv.size() > 1)
+        if (rv.size() > 1) {
+            // Shuffle so everybody doesn't use the first one
             Collections.shuffle(rv, _context.random());
-        TransportUtil.IPv6Config config = getIPv6Config();
-        int adj;
-        switch (config) {
-              case IPV6_DISABLED:
-                adj = 10;
-              /**** IPv6 addresses will be rejected in isPubliclyRoutable()
-                for (Iterator<RouterAddress> iter = rv.iterator(); iter.hasNext(); ) {
-                    byte[] ip = iter.next().getIP();
-                    if (ip != null && ip.length == 16)
-                        iter.remove();
-                }
-               ****/
-                break;
-              case IPV6_NOT_PREFERRED:
-                adj = 1; break;
-              default:
-              case IPV6_ENABLED:
-                adj = 0; break;
-              case IPV6_PREFERRED:
-                adj = -1; break;
-              case IPV6_ONLY:
-                adj = -10;
-              /**** IPv6 addresses will be rejected in isPubliclyRoutable()
-                for (Iterator<RouterAddress> iter = rv.iterator(); iter.hasNext(); ) {
-                    byte[] ip = iter.next().getIP();
-                    if (ip != null && ip.length == 4)
-                        iter.remove();
-                }
-               ****/
-                break;
-        }
-        if (rv.size() > 1)
+            TransportUtil.IPv6Config config = getIPv6Config();
+            int adj;
+            switch (config) {
+                  case IPV6_DISABLED:
+                    adj = 10;
+                  /**** IPv6 addresses will be rejected in isPubliclyRoutable()
+                    for (Iterator<RouterAddress> iter = rv.iterator(); iter.hasNext(); ) {
+                        byte[] ip = iter.next().getIP();
+                        if (ip != null && ip.length == 16)
+                            iter.remove();
+                    }
+                   ****/
+                    break;
+
+                  case IPV6_NOT_PREFERRED:
+                    adj = 1; break;
+                  default:
+
+                  case IPV6_ENABLED:
+                    adj = 0; break;
+
+                  case IPV6_PREFERRED:
+                    adj = -1; break;
+
+                  case IPV6_ONLY:
+                    adj = -10;
+                  /**** IPv6 addresses will be rejected in isPubliclyRoutable()
+                    for (Iterator<RouterAddress> iter = rv.iterator(); iter.hasNext(); ) {
+                        byte[] ip = iter.next().getIP();
+                        if (ip != null && ip.length == 4)
+                            iter.remove();
+                    }
+                   ****/
+                    break;
+            }
             Collections.sort(rv, new AddrComparator(adj));
+        }
         return rv;
     }
 
@@ -841,10 +846,10 @@ public abstract class TransportImpl implements Transport {
     public void mayDisconnect(Hash peer) {}
 
     public boolean isUnreachable(Hash peer) {
-        long now = _context.clock().now();
         synchronized (_unreachableEntries) {
             Long when = _unreachableEntries.get(peer);
             if (when == null) return false;
+            long now = _context.clock().now();
             if (when.longValue() + UNREACHABLE_PERIOD < now) {
                 _unreachableEntries.remove(peer);
                 return false;
@@ -905,10 +910,10 @@ public abstract class TransportImpl implements Transport {
      * This is NOT reset if the peer contacts us.
      */
     public boolean wasUnreachable(Hash peer) {
-        long now = _context.clock().now();
         synchronized (_wasUnreachableEntries) {
             Long when = _wasUnreachableEntries.get(peer);
             if (when != null) {
+                long now = _context.clock().now();
                 if (when.longValue() + WAS_UNREACHABLE_PERIOD < now) {
                     _unreachableEntries.remove(peer);
                     return false;
@@ -975,6 +980,13 @@ public abstract class TransportImpl implements Transport {
             return _IPMap.get(peer);
         }
     }
+
+    /**
+     * An alternate supported style, or null.
+     * @return null, override to add support
+     * @since 0.9.35
+     */
+    public String getAltStyle() { return null; }
 
     /**
      *  @since 0.9.3

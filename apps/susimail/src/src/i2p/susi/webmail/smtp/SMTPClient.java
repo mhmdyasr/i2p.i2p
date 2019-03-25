@@ -23,7 +23,6 @@
  */
 package i2p.susi.webmail.smtp;
 
-import i2p.susi.debug.Debug;
 import i2p.susi.webmail.Attachment;
 import i2p.susi.webmail.Messages;
 import i2p.susi.webmail.encoding.Encoding;
@@ -41,8 +40,10 @@ import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.i2p.I2PAppContext;
 import net.i2p.data.DataHelper;
 import net.i2p.util.InternalSocket;
+import net.i2p.util.Log;
 
 /**
  * @author susi
@@ -63,6 +64,7 @@ public class SMTPClient {
 	 */
 	public static final long BINARY_MAX_SIZE = (long) ((DEFAULT_MAX_SIZE * 57.0d / 78) - 32*1024);
 
+	private final Log _log;
 	private Socket socket;
 	public String error;
 	private String lastResponse;
@@ -79,6 +81,7 @@ public class SMTPClient {
 	{
 		error = "";
 		lastResponse = "";
+		_log = I2PAppContext.getGlobalContext().logManager().getLog(SMTPClient.class);
 	}
 	
 	/**
@@ -121,7 +124,7 @@ public class SMTPClient {
 	 */
 	private void sendCmdNoWait(String cmd) throws IOException
 	{
-		Debug.debug( Debug.DEBUG, "SMTP sendCmd(" + cmd +")" );
+		if (_log.shouldDebug()) _log.debug("SMTP sendCmd(" + cmd +")" );
 		
 		if( socket == null )
 			throw new IOException("no socket");
@@ -141,7 +144,7 @@ public class SMTPClient {
 	{
 		int rv = 0;
 		if (supportsPipelining) {
-			Debug.debug(Debug.DEBUG, "SMTP pipelining " + cmds.size() + " commands");
+			if (_log.shouldDebug()) _log.debug("SMTP pipelining " + cmds.size() + " commands");
 			try {
 				for (SendExpect cmd : cmds) {
 					sendCmdNoWait(cmd.send);
@@ -168,7 +171,7 @@ public class SMTPClient {
 				rv++;
 			}
 		}
-		Debug.debug(Debug.DEBUG, "SMTP success in " + rv + " of " + cmds.size() + " commands");
+		if (_log.shouldDebug()) _log.debug("SMTP success in " + rv + " of " + cmds.size() + " commands");
 		return rv;
 	}
 
@@ -193,7 +196,7 @@ public class SMTPClient {
 			InputStream in = socket.getInputStream();
 			StringBuilder buf = new StringBuilder(128);
 			while (DataHelper.readLine(in, buf)) {
-				Debug.debug(Debug.DEBUG, "SMTP rcv \"" + buf.toString().trim() + '"');
+				if (_log.shouldDebug()) _log.debug("SMTP rcv \"" + buf.toString().trim() + '"');
 				int len = buf.length();
 				if (len < 4) {
 					result = 0;
@@ -221,7 +224,7 @@ public class SMTPClient {
 	}
 
 	/**
-	 *  @param body without the attachments
+	 *  @param body headers and body, without the attachments
 	 *  @param attachments may be null
 	 *  @param boundary non-null if attachments is non-null
 	 *  @return success
@@ -248,6 +251,7 @@ public class SMTPClient {
 				socket.setSoTimeout(120*1000);
 				int result = sendCmd(null);
 				if (result != 220) {
+					error += _t("Error sending mail") + '\n';
 					if (result != 0)
 						error += _t("Server refused connection") + " (" + result + ")\n";
 					else
@@ -265,16 +269,16 @@ public class SMTPClient {
 					for (String c : caps) {
 						if (c.equals("PIPELINING")) {
 							supportsPipelining = true;
-							Debug.debug(Debug.DEBUG, "Server supports pipelining");
+							if (_log.shouldDebug()) _log.debug("Server supports pipelining");
 						} else if (c.startsWith("SIZE ")) {
 							try {
 								maxSize = Long.parseLong(c.substring(5));
-								Debug.debug(Debug.DEBUG, "Server max size: " + maxSize);
+								if (_log.shouldDebug()) _log.debug("Server max size: " + maxSize);
 							} catch (NumberFormatException nfe) {}
 						} else if (c.equals("8BITMIME")) {
 							// unused, see encoding/EightBit.java
 							eightBitMime = true;
-							Debug.debug(Debug.DEBUG, "Server supports 8bitmime");
+							if (_log.shouldDebug()) _log.debug("Server supports 8bitmime");
 						}
 					}
 				} else {
@@ -283,7 +287,7 @@ public class SMTPClient {
 				}
 			}
 			if (ok && maxSize < DEFAULT_MAX_SIZE) {
-				Debug.debug(Debug.DEBUG, "Rechecking with new max size");
+				if (_log.shouldDebug()) _log.debug("Rechecking with new max size");
 				// recalculate whether we'll fit
 				// copied from WebMail
 				long total = body.length();
@@ -326,51 +330,12 @@ public class SMTPClient {
 			}
 			if (ok) {
 				// in-memory replace, no copies
-				int oidx = 0;
-				while (true) {
-					int idx = body.indexOf("\r\n.\r\n", oidx);
-					if (idx < 0)
-						break;
-					body.replace(idx, idx + 5, "\r\n..\r\n");
-					oidx = idx;
-				}
+                                DataHelper.replace(body, "\r\n.\r\n", "\r\n..\r\n");
 				//socket.getOutputStream().write(DataHelper.getUTF8(body));
 				//socket.getOutputStream().write(DataHelper.getASCII("\r\n.\r\n"));
 				// Do it this way so we don't double the memory
 				out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), "ISO-8859-1"));
-				out.write(body.toString());
-				// moved from WebMail so we don't bring the attachments into memory
-				// Also TODO use the 250 service extension responses to pick the best encoding
-				// and check the max total size
-				if (attachments != null && !attachments.isEmpty()) {
-					for(Attachment attachment : attachments) {
-						String encodeTo = attachment.getTransferEncoding();
-						Encoding encoding = EncodingFactory.getEncoding(encodeTo);
-						if (encoding == null)
-							throw new EncodingException( _t("No Encoding found for {0}", encodeTo));
-						// ref: https://blog.nodemailer.com/2017/01/27/the-mess-that-is-attachment-filenames/
-						// ref: RFC 2231
-						// split Content-Disposition into 3 lines to maximize room
-						// TODO filename*0* for long names...
-						String name = attachment.getFileName();
-						String name2 = FilenameUtil.sanitizeFilename(name);
-						String name3 = FilenameUtil.encodeFilenameRFC5987(name);
-						out.write("\r\n--" + boundary +
-						          "\r\nContent-type: " + attachment.getContentType() +
-						          "\r\nContent-Disposition: attachment;\r\n\tfilename=\"" + name2 +
-						          "\";\r\n\tfilename*=" + name3 +
-						          "\r\nContent-Transfer-Encoding: " + attachment.getTransferEncoding() +
-						          "\r\n\r\n");
-						InputStream in = null;
-						try {
-							in = attachment.getData();
-						 	encoding.encode(in, out);
-						} finally {
-							if (in != null) try { in.close(); } catch (IOException ioe) {}
-						}
-					}
-					out.write( "\r\n--" + boundary + "--\r\n" );
-				}
+				writeMail(out, body, attachments, boundary);
 				out.write("\r\n.\r\n");
 				out.flush();
 				socket.setSoTimeout(0);
@@ -381,6 +346,8 @@ public class SMTPClient {
 					error += _t("Error sending mail") + " (" + result +  ")\n";
 			}
 		} catch (IOException e) {
+			if (_log.shouldWarn())
+				_log.warn("Error sending mail", e);
 			error += _t("Error sending mail") + ": " + e.getMessage() + '\n';
 		}
 		if( !mailSent && lastResponse.length() > 0 ) {
@@ -396,6 +363,50 @@ public class SMTPClient {
 			if (out != null) try { out.close(); } catch (IOException ioe) {}
 		}
 		return mailSent;
+	}
+
+	/**
+	 *  Caller must close out
+	 *
+	 *  @param body headers and body, without the attachments
+	 *  @param attachments may be null
+	 *  @param boundary non-null if attachments is non-null
+	 */
+	public static void writeMail(Writer out, StringBuilder body,
+	                             List<Attachment> attachments, String boundary) throws IOException {
+		out.write(body.toString());
+		// moved from WebMail so we don't bring the attachments into memory
+		// Also TODO use the 250 service extension responses to pick the best encoding
+		// and check the max total size
+		if (attachments != null && !attachments.isEmpty()) {
+			for(Attachment attachment : attachments) {
+				String encodeTo = attachment.getTransferEncoding();
+				Encoding encoding = EncodingFactory.getEncoding(encodeTo);
+				if (encoding == null)
+					throw new EncodingException( _t("No Encoding found for {0}", encodeTo));
+				// ref: https://blog.nodemailer.com/2017/01/27/the-mess-that-is-attachment-filenames/
+				// ref: RFC 2231
+				// split Content-Disposition into 3 lines to maximize room
+				// TODO filename*0* for long names...
+				String name = attachment.getFileName();
+				String name2 = FilenameUtil.sanitizeFilename(name);
+				String name3 = FilenameUtil.encodeFilenameRFC5987(name);
+				out.write("\r\n--" + boundary +
+				          "\r\nContent-type: " + attachment.getContentType() +
+				          "\r\nContent-Disposition: attachment;\r\n\tfilename=\"" + name2 +
+				          "\";\r\n\tfilename*=" + name3 +
+				          "\r\nContent-Transfer-Encoding: " + attachment.getTransferEncoding() +
+				          "\r\n\r\n");
+				InputStream in = null;
+				try {
+					in = attachment.getData();
+				 	encoding.encode(in, out);
+				} finally {
+					if (in != null) try { in.close(); } catch (IOException ioe) {}
+				}
+			}
+			out.write( "\r\n--" + boundary + "--\r\n" );
+		}
 	}
 
 	/**

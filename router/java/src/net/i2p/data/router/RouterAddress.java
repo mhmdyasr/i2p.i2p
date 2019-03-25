@@ -279,7 +279,8 @@ public class RouterAddress extends DataStructureImpl {
     public void readBytes(InputStream in) throws DataFormatException, IOException {
         if (_transportStyle != null)
             throw new IllegalStateException();
-        _cost = (short) DataHelper.readLong(in, 1);
+        // EOF will be thrown in next read
+        _cost = (short) in.read();
         _expiration = DataHelper.readLong(in, 8);
         _transportStyle = DataHelper.readString(in);
         // reduce Object proliferation
@@ -287,6 +288,8 @@ public class RouterAddress extends DataStructureImpl {
             _transportStyle = "SSU";
         else if (_transportStyle.equals("NTCP"))
             _transportStyle = "NTCP";
+        else if (_transportStyle.equals("NTCP2"))
+            _transportStyle = "NTCP2";
         DataHelper.readProperties(in, _options);
     }
     

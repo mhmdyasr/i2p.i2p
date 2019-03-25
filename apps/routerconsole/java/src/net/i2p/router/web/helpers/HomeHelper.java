@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
+import net.i2p.CoreVersion;
 import net.i2p.data.DataHelper;
 import net.i2p.router.RouterContext;
 import net.i2p.router.web.App;
@@ -14,6 +15,8 @@ import net.i2p.router.web.ConfigUpdateHandler;
 import net.i2p.router.web.HelperBase;
 import net.i2p.router.web.Messages;
 import net.i2p.router.web.NavHelper;
+import net.i2p.router.web.PluginStarter;
+import net.i2p.router.web.WebAppStarter;
 import net.i2p.util.PortMapper;
 
 /**
@@ -35,9 +38,9 @@ public class HomeHelper extends HelperBase {
         _x("Addressbook") + S + _x("Manage your I2P hosts file here (I2P domain name resolution)") + S + "/dns" + S + I + "book_addresses.png" + S +
         _x("Configure Bandwidth") + S + _x("I2P Bandwidth Configuration") + S + "/config" + S + I + "info/bandwidth.png" + S +
         // FIXME wasn't escaped
-        _x("Configure UI") + S + _x("Select console theme & language & set optional console password").replace("&", "&amp;") + S + "/configui" + S + I + "info/ui.png" + S +
-        _x("Customize Home Page") + S + _x("I2P Home Page Configuration") + S + "/confighome" + S + I + "home_page.png" + S +
-        _x("Customize Sidebar") + S + _x("Customize the sidebar by adding or removing or repositioning elements") + S + "/configsidebar" + S + I + "info/sidebar.png" + S +
+        //_x("Configure UI") + S + _x("Select console theme & language & set optional console password").replace("&", "&amp;") + S + "/configui" + S + I + "info/ui.png" + S +
+        //_x("Customize Home Page") + S + _x("I2P Home Page Configuration") + S + "/confighome" + S + I + "home_page.png" + S +
+        //_x("Customize Sidebar") + S + _x("Customize the sidebar by adding or removing or repositioning elements") + S + "/configsidebar" + S + I + "info/sidebar.png" + S +
         _x("Email") + S + _x("Anonymous webmail client") + S + "/webmail" + S + I + "email.png" + S +
         _x("Help") + S + _x("I2P Router Help") + S + "/help" + S + I + "support.png" + S +
         _x("Manage Plugins") + S + _x("Install and configure I2P plugins") + S + "/configplugins" + S + I + "plugin.png" + S +
@@ -51,13 +54,14 @@ public class HomeHelper extends HelperBase {
         "anoncoin.i2p" + S + _x("The Anoncoin project") + S + "http://anoncoin.i2p/" + S + I + "anoncoin_32.png" + S +
         _x("I2P Bug Reports") + S + _x("Bug tracker") + S + "http://trac.i2p2.i2p/report/1" + S + I + "bug.png" + S +
         //"colombo-bt.i2p" + S + _x("The Italian Bittorrent Resource") + S + "http://colombo-bt.i2p/" + S + I + "colomboicon.png" + S +
+        _x("Dev Builds") + S + _x("Development builds of I2P") + S + "http://bobthebuilder.i2p/" + S + I + "script_gear.png" + S +
         _x("Dev Forum") + S + _x("Development forum") + S + "http://zzz.i2p/" + S + I + "group_gear.png" + S +
         //_x("diftracker") + S + _x("Bittorrent tracker") + S + "http://diftracker.i2p/" + S + I + "magnet.png" + S +
         "echelon.i2p" + S + _x("I2P Applications") + S + "http://echelon.i2p/" + S + I + "box_open.png" + S +
-        "exchanged.i2p" + S + _x("Anonymous cryptocurrency exchange") + S + "http://exchanged.i2p/" + S + I + "exchanged.png" + S +
+        //"exchanged.i2p" + S + _x("Anonymous cryptocurrency exchange") + S + "http://exchanged.i2p/" + S + I + "exchanged.png" + S +
         _x("I2P FAQ") + S + _x("Frequently Asked Questions") + S + "http://i2p-projekt.i2p/faq" + S + I + "question.png" + S +
         _x("I2P Forum") + S + _x("Community forum") + S + "http://i2pforum.i2p/" + S + I + "group.png" + S +
-        "git.repo.i2p" + S + _x("A public anonymous Git hosting site - supports pulling via Git and HTTP and pushing via SSH") + S + "http://git.repo.i2p/" + S + I + "git-logo.png" + S +
+        //"git.repo.i2p" + S + _x("A public anonymous Git hosting site - supports pulling via Git and HTTP and pushing via SSH") + S + "http://git.repo.i2p/" + S + I + "git-logo.png" + S +
         //"hiddengate [ru]" + S + _x("Russian I2P-related wiki") + S + "http://hiddengate.i2p/" + S + I + "hglogo32.png" + S +
         _x("I2P Wiki") + S + _x("Anonymous wiki - share the knowledge") + S + "http://i2pwiki.i2p/" + S + I + "i2pwiki_logo.png" + S +
         //"Ident " + _x("Microblog") + S + _x("Your premier microblogging service on I2P") + S + "http://id3nt.i2p/" + S + I + "ident_icon_blue.png" + S +
@@ -65,11 +69,12 @@ public class HomeHelper extends HelperBase {
         //"jisko.i2p" + S + _x("Simple and fast microblogging website") + S + "http://jisko.i2p/" + S + I + "jisko_console_icon.png" + S +
         //_x("Key Server") + S + _x("OpenPGP Keyserver") + S + "http://keys.i2p/" + S + I + "education.png" + S +
         //"killyourtv.i2p" + S + _x("Debian and Tahoe-LAFS repositories") + S + "http://killyourtv.i2p/" + S + I + "television_delete.png" + S +
-        _x("Open4You") + S + _x("Free eepsite hosting with PHP and MySQL") + S + "http://open4you.i2p/" + S + I + "open4you-logo.png" + S +
-        _x("Pastebin") + S + _x("Encrypted I2P Pastebin") + S + "http://zerobin.i2p/" + S + I + "paste_plain.png" + S +
+        //_x("Open4You") + S + _x("Free eepsite hosting with PHP and MySQL") + S + "http://open4you.i2p/" + S + I + "open4you-logo.png" + S +
+        //_x("Pastebin") + S + _x("Encrypted I2P Pastebin") + S + "http://zerobin.i2p/" + S + I + "paste_plain.png" + S +
         _x("Planet I2P") + S + _x("I2P News") + S + "http://planet.i2p/" + S + I + "world.png" + S +
         _x("I2P Plugins") + S + _x("Add-on directory") + S + "http://i2pwiki.i2p/index.php?title=Plugins" + S + I + "info/plugin_link.png" + S +
         //_x("Postman's Tracker") + S + _x("Bittorrent tracker") + S + "http://tracker2.postman.i2p/" + S + I + "magnet.png" + S +
+        _x("PrivateBin") + S + _x("Encrypted I2P Pastebin") + S + "http://paste.crypthost.i2p/" + S + I + "paste_plain.png" + S +
         _x("Project Website") + S + _x("I2P home page") + S + "http://i2p-projekt.i2p/" + S + I + "info_rhombus.png" + S +
         //_x("lenta news [ru]") + S + _x("Russian News Feed") + S + "http://lenta.i2p/" + S + I + "lenta_main_logo.png" + S +
         //"Salt" + S + "salt.i2p" + S + "http://salt.i2p/" + S + I + "salt_console.png" + S +
@@ -186,20 +191,46 @@ public class HomeHelper extends HelperBase {
         String website = _t("Web Server");
         StringBuilder buf = new StringBuilder(1024);
         buf.append("<div class=\"appgroup\">");
+        PortMapper pm = _context.portMapper();
         for (App app : apps) {
             String url;
             if (app.name.equals(website) && app.url.equals("http://127.0.0.1:7658/")) {
+                int port = pm.getPort(PortMapper.SVC_EEPSITE);
+                int sslPort = pm.getPort(PortMapper.SVC_HTTPS_EEPSITE);
+                if (port <= 0 && sslPort <= 0)
+                    continue;
                 // fixup eepsite link
-                url = "http://" + _context.portMapper().getActualHost(PortMapper.SVC_EEPSITE, "127.0.0.1") +
-                      ':' + _context.portMapper().getPort(PortMapper.SVC_EEPSITE, 7658) + '/';
+                if (sslPort > 0) {
+                    url = "https://" + pm.getActualHost(PortMapper.SVC_HTTPS_EEPSITE, "127.0.0.1") +
+                      ':' + sslPort + '/';
+                } else {
+                    url = "http://" + pm.getActualHost(PortMapper.SVC_EEPSITE, "127.0.0.1") +
+                      ':' + port + '/';
+                }
             } else {
                 url = app.url;
+                // check for disabled webapps and other things
+                if (url.equals("/dns")) {
+                    if (!pm.isRegistered("susidns"))
+                        continue;
+                } else if (url.equals("/webmail")) {
+                    if (!pm.isRegistered("susimail"))
+                        continue;
+                } else if (url.equals("/torrents")) {
+                    if (!pm.isRegistered("i2psnark"))
+                        continue;
+                } else if (url.equals("/configplugins")) {
+                    if (!PluginStarter.pluginsEnabled(_context))
+                        continue;
+                }
             }
             buf.append("\n<div class=\"app\">\n" +
                        "<div class=\"appimg\">" +
                        // usability: add tabindex -1 so we avoid 2 tabs per app
                        "<a href=\"").append(url).append("\" tabindex=\"-1\">" +
-                       "<img alt=\"\" title=\"").append(app.desc).append("\" src=\"").append(app.icon).append("\"></a>" +
+                       "<img alt=\"\" title=\"").append(app.desc).append("\" src=\"").append(app.icon)
+               // version the icons because they may change
+               .append('?').append(CoreVersion.VERSION).append("\"></a>" +
                        "</div>\n" +
                        "<table><tr><td>" +
                        "<div class=\"applabel\">" +

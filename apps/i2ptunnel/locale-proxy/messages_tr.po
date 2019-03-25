@@ -4,7 +4,7 @@
 # To contribute translations, see http://www.i2p2.de/newdevelopers
 # 
 # Translators:
-# Kaya Zeren <kayazeren@gmail.com>, 2016-2017
+# Kaya Zeren <kayazeren@gmail.com>, 2016-2018
 # Ozancan Karataş <ozancankaratas96@outlook.com>, 2015
 # zzzi2p, 2018
 msgid ""
@@ -12,14 +12,14 @@ msgstr ""
 "Project-Id-Version: I2P\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2017-06-05 23:01+0000\n"
-"PO-Revision-Date: 2018-01-26 18:15+0000\n"
-"Last-Translator: zzzi2p\n"
+"PO-Revision-Date: 2018-08-12 21:29+0000\n"
+"Last-Translator: Kaya Zeren <kayazeren@gmail.com>\n"
 "Language-Team: Turkish (Turkey) (http://www.transifex.com/otf/I2P/language/tr_TR/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Language: tr_TR\n"
-"Plural-Forms: nplurals=1; plural=0;\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
 #: ../java/build/Proxy.java:5 ../java/build/Proxy.java:11
 #: ../java/build/Proxy.java:42 ../java/build/Proxy.java:48
@@ -204,17 +204,17 @@ msgstr "Web sitesi büyük olasılıkla çalışmıyor ancak bir ağ tıkanıkl�
 
 #: ../java/build/Proxy.java:54 ../java/build/Proxy.java:60
 msgid "Warning: Invalid Request URI"
-msgstr "Uyarı: İstek İnternet Adresi Geçersiz"
+msgstr "Uyarı: İstek Adresi Geçersiz"
 
 #: ../java/build/Proxy.java:61
 msgid "The request URI is invalid, and probably contains illegal characters."
-msgstr "İstek İnternet adresi geçersiz ve büyük olasılıkla uygun olmayan karakterler içeriyor."
+msgstr "İstek adresi geçersiz ve büyük olasılıkla uygun olmayan karakterler içeriyor."
 
 #: ../java/build/Proxy.java:62
 msgid ""
 "If you clicked a link, check the end of the URI for any characters the "
 "browser has mistakenly added on."
-msgstr "Bir bağlantıya tıkladıysanız, İnternet adresinin sonuna bakarak hatalı eklenmiş karakterler olup olmadığını denetleyin."
+msgstr "Bir bağlantıya tıkladıysanız, adresin sonuna bakarak hatalı eklenmiş karakterler olup olmadığını denetleyin."
 
 #: ../java/build/Proxy.java:63
 msgid "Error: Request Denied"
@@ -357,7 +357,7 @@ msgstr "Uyarı: Kötü Adres Yardımcısı"
 #: ../java/build/Proxy.java:145
 #, java-format
 msgid "The helper key in the URL ({0}i2paddresshelper={1}) is not resolvable."
-msgstr "İnternet adresindeki ({0}i2paddresshelper={1}) çözümlenemedi."
+msgstr "Adresteki ({0}i2paddresshelper={1}) çözümlenemedi."
 
 #: ../java/build/Proxy.java:146
 msgid "It seems to be garbage data, or a mistyped Base 32 address."
@@ -367,7 +367,7 @@ msgstr "Anlamsız bir veri ya da hatalı yazılmış bir Base 32 adresi gibi gö
 msgid ""
 "Check your URL to try and fix the helper key to be a valid Base 32 hostname "
 "or Base 64 key."
-msgstr "İnternet adresini denetleyip, yardımcı anahtarı geçerli bir Base 32 sunucu adı ya da Base 64 anahtarı olacak şekilde düzeltmeyi deneyin."
+msgstr "Adresi denetleyip, yardımcı anahtarı geçerli bir Base 32 sunucu adı ya da Base 64 anahtarı olacak şekilde düzeltmeyi deneyin."
 
 #: ../java/build/Proxy.java:155
 msgid "The HTTP Outproxy was not found."

@@ -24,7 +24,7 @@ input.default {
 <jsp:useBean class="net.i2p.router.web.helpers.ConfigHomeHandler" id="formhandler" scope="request" />
 <%@include file="formhandler.jsi" %>
 <jsp:useBean class="net.i2p.router.web.helpers.HomeHelper" id="homehelper" scope="request" />
-<jsp:setProperty name="homehelper" property="contextId" value="<%=(String)session.getAttribute(\"i2p.contextId\")%>" />
+<jsp:setProperty name="homehelper" property="contextId" value="<%=i2pcontextId%>" />
 
 <h3 class="tabletitle"><%=intl._t("Default Home Page")%></h3>
 <form action="" method="POST">
@@ -62,12 +62,12 @@ input.default {
 <%
    }  // shouldShowSearch()
 %>
-<h3 class="tabletitle"><%=intl._t("Applications and Configuration")%></h3>
+<h3 class="tabletitle"><%=intl._t("Hidden Services of Interest")%></h3>
 <form action="" method="POST">
  <input type="hidden" name="nonce" value="<%=pageNonce%>" >
- <input type="hidden" name="group" value="2">
- <jsp:getProperty name="homehelper" property="configServices" />
- <div class="formaction" id="homeapps">
+ <input type="hidden" name="group" value="1">
+ <jsp:getProperty name="homehelper" property="configFavorites" />
+ <div class="formaction" id="homesites">
   <input type="submit" name="action" class="default" value="<%=intl._t("Add item")%>" >
   <input type="submit" name="action" class="delete" value="<%=intl._t("Delete selected")%>" >
   <input type="reset" class="cancel" value="<%=intl._t("Cancel")%>" >
@@ -76,12 +76,12 @@ input.default {
  </div>
 </form>
 
-<h3 class="tabletitle"><%=intl._t("Hidden Services of Interest")%></h3>
+<h3 class="tabletitle"><%=intl._t("Applications and Configuration")%></h3>
 <form action="" method="POST">
  <input type="hidden" name="nonce" value="<%=pageNonce%>" >
- <input type="hidden" name="group" value="1">
- <jsp:getProperty name="homehelper" property="configFavorites" />
- <div class="formaction" id="homesites">
+ <input type="hidden" name="group" value="2">
+ <jsp:getProperty name="homehelper" property="configServices" />
+ <div class="formaction" id="homeapps">
   <input type="submit" name="action" class="default" value="<%=intl._t("Add item")%>" >
   <input type="submit" name="action" class="delete" value="<%=intl._t("Delete selected")%>" >
   <input type="reset" class="cancel" value="<%=intl._t("Cancel")%>" >

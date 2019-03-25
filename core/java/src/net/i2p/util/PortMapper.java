@@ -3,6 +3,7 @@ package net.i2p.util;
 import java.io.IOException;
 import java.io.Writer;
 import java.net.InetSocketAddress;
+import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -26,6 +27,8 @@ public class PortMapper {
     public static final String SVC_HTTP_PROXY = "HTTP";
     public static final String SVC_HTTPS_PROXY = "HTTPS";
     public static final String SVC_EEPSITE = "eepsite";
+    /** @since 0.9.34 */
+    public static final String SVC_HTTPS_EEPSITE = "https_eepsite";
     public static final String SVC_IRC = "irc";
     public static final String SVC_SOCKS = "socks";
     public static final String SVC_TAHOE = "tahoe-lafs";
@@ -45,6 +48,42 @@ public class PortMapper {
     public static final String SVC_HTTP_I2PCONTROL = "http_i2pcontrol";
     /** @since 0.9.34 */
     public static final String SVC_HTTPS_I2PCONTROL = "https_i2pcontrol";
+    /**
+     *  To indicate presence, alternative to WebAppStarter.isWebappRunning().
+     *  For actual base URL, use getConsoleURL()
+     *  @since 0.9.34
+     */
+    public static final String SVC_I2PSNARK = "i2psnark";
+    /**
+     *  To indicate presence, alternative to WebAppStarter.isWebappRunning().
+     *  For actual base URL, use getConsoleURL()
+     *  @since 0.9.34
+     */
+    public static final String SVC_I2PTUNNEL = "i2ptunnel";
+    /**
+     *  To indicate presence, alternative to WebAppStarter.isWebappRunning().
+     *  For actual base URL, use getConsoleURL()
+     *  @since 0.9.34
+     */
+    public static final String SVC_IMAGEGEN = "imagegen";
+    /**
+     *  To indicate presence, alternative to WebAppStarter.isWebappRunning().
+     *  For actual base URL, use getConsoleURL()
+     *  @since 0.9.34
+     */
+    public static final String SVC_SUSIDNS = "susidns";
+    /**
+     *  To indicate presence, alternative to WebAppStarter.isWebappRunning().
+     *  For actual base URL, use getConsoleURL()
+     *  @since 0.9.34
+     */
+    public static final String SVC_SUSIMAIL = "susimail";
+    /**
+     *  To indicate presence, alternative to WebAppStarter.isWebappRunning().
+     *  For actual base URL, use getConsoleURL()
+     *  @since 0.9.39
+     */
+    public static final String SVC_JSONRPC = "jsonrpc";
 
     /** @since 0.9.34 */
     public static final int DEFAULT_CONSOLE_PORT = 7657;
@@ -83,10 +122,31 @@ public class PortMapper {
     }
 
     /**
+     *  Is the service registered?
+     *
+     *  @since 0.9.34
+     */
+    public boolean isRegistered(String service) {
+        return _dir.containsKey(service);
+    }
+
+    /**
      *  Remove the service
      */
     public void unregister(String service) {
         _dir.remove(service);
+    }
+
+    /**
+     *  Remove the service,
+     *  only if it is registered with the supplied port.
+     *
+     *  @since 0.9.34
+     */
+    public void unregister(String service, int port) {
+        // not synched
+        if (getPort(service) == port)
+            _dir.remove(service);
     }
 
     /**
@@ -252,7 +312,7 @@ public class PortMapper {
     public void renderStatusHTML(Writer out) throws IOException {
         List<String> services = new ArrayList<String>(_dir.keySet());
         out.write("<h2 id=\"debug_portmapper\">Port Mapper</h2><table id=\"portmapper\"><tr><th>Service<th>Host<th>Port\n");
-        Collections.sort(services);
+        Collections.sort(services, Collator.getInstance());
         for (String s : services) {
             InetSocketAddress ia = _dir.get(s);
             if (ia == null)

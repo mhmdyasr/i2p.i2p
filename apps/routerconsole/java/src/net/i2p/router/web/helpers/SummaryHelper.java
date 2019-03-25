@@ -9,7 +9,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeSet;
+import java.util.TreeMap;
 
 import net.i2p.data.DataHelper;
 import net.i2p.data.Destination;
@@ -28,6 +28,7 @@ import net.i2p.router.transport.TransportUtil;
 import net.i2p.router.web.CSSHelper;
 import net.i2p.router.web.HelperBase;
 import net.i2p.router.web.NewsHelper;
+import net.i2p.router.web.WebAppStarter;
 import net.i2p.servlet.util.ServletUtil;
 import net.i2p.stat.Rate;
 import net.i2p.stat.RateStat;
@@ -557,10 +558,18 @@ public class SummaryHelper extends HelperBase {
         List<Destination> clients = new ArrayList<Destination>(_context.clientManager().listClients());
 
         StringBuilder buf = new StringBuilder(512);
-        buf.append("<h3><a href=\"/i2ptunnelmgr\" target=\"_top\" title=\"")
+        boolean link = _context.portMapper().isRegistered("i2ptunnel");
+        buf.append("<h3>");
+        if (link) {
+            buf.append("<a href=\"/i2ptunnelmgr\" target=\"_top\" title=\"")
            .append(_t("Add/remove/edit &amp; control your client and server tunnels"))
-           .append("\">").append(_t("Local Tunnels"))
-           .append("</a></h3><hr class=\"b\">");
+           .append("\">");
+        }
+        buf.append(_t("Local Tunnels"));
+        if (link) {
+           buf.append("</a>");
+        }
+        buf.append("</h3><hr class=\"b\">");
         if (!clients.isEmpty()) {
             Collections.sort(clients, new AlphaComparator());
             buf.append("<table id=\"sb_localtunnels\">");
@@ -633,7 +642,7 @@ public class SummaryHelper extends HelperBase {
             TunnelPoolSettings out = _context.tunnelManager().getOutboundSettings(d.calculateHash());
             name = (out != null ? out.getDestinationNickname() : null);
             if (name == null)
-                name = d.calculateHash().toBase64().substring(0,6);
+                name = d.toBase32();
             else
                 name = _t(name);
         } else {
@@ -889,7 +898,7 @@ public class SummaryHelper extends HelperBase {
         if ((avail || unsignedAvail || devSU3Avail) &&
             !NewsHelper.isUpdateInProgress() &&
             !_context.router().gracefulShutdownInProgress() &&
-            _context.portMapper().getPort(PortMapper.SVC_HTTP_PROXY) > 0 &&  // assume using proxy for now
+            _context.portMapper().isRegistered(PortMapper.SVC_HTTP_PROXY) &&  // assume using proxy for now
             getAction() == null &&
             getUpdateNonce() == null) {
                 if (needSpace)
@@ -997,6 +1006,8 @@ public class SummaryHelper extends HelperBase {
             if (config == null)
                 config = _context.getProperty(PROP_SUMMARYBAR + "default", isAdvanced() ? DEFAULT_FULL_ADVANCED : DEFAULT_FULL);
         }
+        if (config.length() <= 0)
+            return Collections.emptyList();
         return Arrays.asList(DataHelper.split(config, SS));
     }
 
@@ -1041,7 +1052,8 @@ public class SummaryHelper extends HelperBase {
         String[] allSections = SummaryBarRenderer.ALL_SECTIONS;
         Map<String, String> sectionNames = SummaryBarRenderer.SECTION_NAMES;
         List<String> sections = getSummaryBarSections("default");
-        TreeSet<String> sortedSections = new TreeSet<String>();
+        // translated section name to section id
+        TreeMap<String, String> sortedSections = new TreeMap<String, String>(Collator.getInstance());
 
         // Forward-convert old section names
         int pos = sections.indexOf("General");
@@ -1055,8 +1067,11 @@ public class SummaryHelper extends HelperBase {
 
         for (int i = 0; i < allSections.length; i++) {
             String section = allSections[i];
-            if (!sections.contains(section))
-                sortedSections.add(section);
+            if (!sections.contains(section)) {
+                String name = sectionNames.get(section);
+                if (name != null)
+                    sortedSections.put(_t(name), section);
+            }
         }
 
         String theme = _context.getProperty(CSSHelper.PROP_THEME_NAME, CSSHelper.DEFAULT_THEME);
@@ -1072,14 +1087,17 @@ public class SummaryHelper extends HelperBase {
            .append("</th></tr>\n");
         for (String section : sections) {
             int i = sections.indexOf(section);
+            String name = sectionNames.get(section);
+            if (name == null)
+                continue;
             buf.append("<tr><td align=\"center\"><input type=\"checkbox\" class=\"optbox\" id=\"")
-               .append(sectionNames.get(section))
+               .append(name)
                .append("\" name=\"delete_")
                .append(i)
                .append("\"></td><td align=\"left\"><label for=\"")
-               .append(sectionNames.get(section))
+               .append(name)
                .append("\">")
-               .append(_t(sectionNames.get(section)))
+               .append(_t(name))
                .append("</label></td><td align=\"right\"><input type=\"hidden\" name=\"order_")
                .append(i).append('_').append(section)
                .append("\" value=\"")
@@ -1141,9 +1159,11 @@ public class SummaryHelper extends HelperBase {
            .append(_t("Select a section to add"))
            .append("</option>\n");
 
-        for (String s : sortedSections) {
+        for (Map.Entry<String, String> e : sortedSections.entrySet()) {
+            String name = e.getKey();
+            String s = e.getValue();
             buf.append("<option value=\"").append(s).append("\">")
-               .append(sectionNames.get(s)).append("</option>\n");
+               .append(name).append("</option>\n");
         }
 
         buf.append("</select>\n" +

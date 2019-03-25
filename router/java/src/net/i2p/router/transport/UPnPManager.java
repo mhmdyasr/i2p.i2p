@@ -58,6 +58,9 @@ class UPnPManager {
     // 30 minutes is also the default "lease time" in cybergarage.
     // It expires after 31 minutes.
     private static final long RESCAN_LONG_DELAY = 14*60*1000;
+    // make these generic so we don't advertise we're running I2P
+    private static final String TCP_PORT_NAME = "TCP";
+    private static final String UDP_PORT_NAME = "UDP";
 
     public UPnPManager(RouterContext context, TransportManager manager) {
         _context = context;
@@ -140,16 +143,17 @@ class UPnPManager {
      *  Should be fast. This only starts the search, the responses
      *  will come in over the MX time (3 seconds).
      *
+     *  @return true if a rescan was actually fired off
      *  @since 0.9.18
      */
-    public synchronized void rescan() {
+    public synchronized boolean rescan() {
         if (!_shouldBeRunning)
-            return;
+            return false;
         if (_context.router().gracefulShutdownInProgress())
-            return;
+            return false;
         long now = System.currentTimeMillis();
         if (_lastRescan + RESCAN_MIN_DELAY > now)
-            return;
+            return false;
         _lastRescan = now;
         if (_isRunning) {
             if (_log.shouldLog(Log.DEBUG))
@@ -162,6 +166,7 @@ class UPnPManager {
         } else {
             start();
         }
+        return true;
     }
 
     /**
@@ -192,7 +197,7 @@ class UPnPManager {
      */
     public void update(Set<TransportManager.Port> ports) {
         if (_log.shouldLog(Log.DEBUG))
-            _log.debug("UPnP Update with " + ports.size() + " ports");
+            _log.debug("UPnP Update with " + ports.size() + " ports", new Exception("I did it"));
 
         //synchronized(this) {
             // TODO
@@ -208,16 +213,20 @@ class UPnPManager {
         for (TransportManager.Port entry : ports) {
             String style = entry.style;
             int port = entry.port;
-            int protocol = -1;
-            if ("SSU".equals(style))
+            int protocol;
+            String name;
+            if ("SSU".equals(style)) {
                 protocol = ForwardPort.PROTOCOL_UDP_IPV4;
-            else if ("NTCP".equals(style))
+                name = UDP_PORT_NAME;
+            } else if ("NTCP".equals(style)) {
                 protocol = ForwardPort.PROTOCOL_TCP_IPV4;
-            else
+                name = TCP_PORT_NAME;
+            } else {
                 continue;
+            }
             if (_log.shouldLog(Log.DEBUG))
                 _log.debug("Adding: " + style + " " + port);
-            ForwardPort fp = new ForwardPort(style, false, protocol, port);
+            ForwardPort fp = new ForwardPort(name, false, protocol, port);
             forwards.add(fp);
         }
         // non-blocking
@@ -233,7 +242,7 @@ class UPnPManager {
         /** Called to indicate status on one or more forwarded ports. */
         public void portForwardStatus(Map<ForwardPort,ForwardPortStatus> statuses) {
             if (_log.shouldLog(Log.DEBUG))
-                 _log.debug("UPnP Callback:");
+                 _log.debug("UPnP Callback: with " + statuses.size() + " statuses");
             // Let's not have two of these running at once.
             // Deadlock reported in ticket #1699
             // and the locking isn't foolproof in UDPTransport.
@@ -247,7 +256,7 @@ class UPnPManager {
         private void locked_PFS(Map<ForwardPort,ForwardPortStatus> statuses) {
             byte[] ipaddr = null;
             DetectedIP[] ips = _upnp.getAddress();
-            if (ips != null) {
+            if (ips != null && ips.length > 0) {
                 for (DetectedIP ip : ips) {
                     // store the first public one and tell the transport manager if it changed
                     // Note that getAddress() will actually return a max of one address.
@@ -261,6 +270,9 @@ class UPnPManager {
                         }
                         ipaddr = ip.publicAddress.getAddress();
                         break;
+                    } else {
+                        if (_log.shouldWarn())
+                            _log.warn("Unusable external address: " + ip.publicAddress + " type: " + ip.natType);
                     }
                 }
             } else {
@@ -268,19 +280,28 @@ class UPnPManager {
                     _log.debug("No external address returned");
             }
 
+            if (statuses.isEmpty()) {
+                if (_log.shouldWarn())
+                    _log.warn("No statuses returned");
+                return;
+            }
+
             for (Map.Entry<ForwardPort, ForwardPortStatus> entry : statuses.entrySet()) {
                 ForwardPort fp = entry.getKey();
                 ForwardPortStatus fps = entry.getValue();
-                if (_log.shouldLog(Log.DEBUG))
-                    _log.debug(fp.name + " " + fp.protocol + " " + fp.portNumber +
+                if (_log.shouldDebug())
+                    _log.debug("FPS: " + fp.name + ' ' + fp.protocol + ' ' + fp.portNumber +
                                " status: " + fps.status + " reason: " + fps.reasonString + " ext port: " + fps.externalPort);
                 String style;
-                if (fp.protocol == ForwardPort.PROTOCOL_UDP_IPV4)
+                if (fp.protocol == ForwardPort.PROTOCOL_UDP_IPV4) {
                     style = "SSU";
-                else if (fp.protocol == ForwardPort.PROTOCOL_TCP_IPV4)
+                } else if (fp.protocol == ForwardPort.PROTOCOL_TCP_IPV4) {
                     style = "NTCP";
-                else
+                } else {
+                    if (_log.shouldWarn())
+                        _log.debug("Unknown protocol " + fp.protocol);
                     continue;
+                }
                 boolean success = fps.status >= ForwardPortStatus.MAYBE_SUCCESS;
                 // deadlock path 2
                 _manager.forwardPortStatus(style, ipaddr, fp.portNumber, fps.externalPort, success, fps.reasonString);

@@ -13,7 +13,6 @@ import net.i2p.client.naming.NamingService;
 import net.i2p.crypto.AESEngine;
 import net.i2p.crypto.CryptixAESEngine;
 import net.i2p.crypto.DSAEngine;
-import net.i2p.crypto.ElGamalAESEngine;
 import net.i2p.crypto.ElGamalEngine;
 import net.i2p.crypto.HMAC256Generator;
 import net.i2p.crypto.HMACGenerator;
@@ -74,7 +73,6 @@ public class I2PAppContext {
     protected SessionKeyManager _sessionKeyManager;
     private NamingService _namingService;
     private ElGamalEngine _elGamalEngine;
-    private ElGamalAESEngine _elGamalAESEngine;
     private AESEngine _AESEngine;
     private LogManager _logManager;
     private HMACGenerator _hmac;
@@ -94,7 +92,6 @@ public class I2PAppContext {
     protected volatile boolean _sessionKeyManagerInitialized;
     private volatile boolean _namingServiceInitialized;
     private volatile boolean _elGamalEngineInitialized;
-    private volatile boolean _elGamalAESEngineInitialized;
     private volatile boolean _AESEngineInitialized;
     private volatile boolean _logManagerInitialized;
     private volatile boolean _hmacInitialized;
@@ -120,7 +117,7 @@ public class I2PAppContext {
     private final ClientAppManager _appManager;
     // split up big lock on this to avoid deadlocks
     private final Object _lock1 = new Object(), _lock2 = new Object(), _lock3 = new Object(), _lock4 = new Object(),
-                         _lock5 = new Object(), _lock6 = new Object(), _lock7 = new Object(), _lock8 = new Object(),
+                         _lock5 = new Object(), _lock7 = new Object(), _lock8 = new Object(),
                          _lock9 = new Object(), _lock10 = new Object(), _lock11 = new Object(), _lock12 = new Object(),
                          _lock13 = new Object(), _lock14 = new Object(), _lock16 = new Object(),
                          _lock17 = new Object(), _lock18 = new Object(), _lock19 = new Object(), _lock20 = new Object();
@@ -322,16 +319,19 @@ public class I2PAppContext {
         } else {
             _appDir = _routerDir;
         }
-        /******
-        (new Exception("Initialized by")).printStackTrace();
-        System.err.println("Base directory:   " + _baseDir.getAbsolutePath());
-        System.err.println("Config directory: " + _configDir.getAbsolutePath());
-        System.err.println("Router directory: " + _routerDir.getAbsolutePath());
-        System.err.println("App directory:    " + _appDir.getAbsolutePath());
-        System.err.println("Log directory:    " + _logDir.getAbsolutePath());
-        System.err.println("PID directory:    " + _pidDir.getAbsolutePath());
-        System.err.println("Temp directory:   " + getTempDir().getAbsolutePath());
-        ******/
+        String isPortableStr = System.getProperty("i2p.dir.portableMode");
+        boolean isPortable = Boolean.parseBoolean(isPortableStr);
+        if (isPortable) {
+            // In portable we like debug information :)
+            //(new Exception("Initialized by")).printStackTrace();
+            System.err.println("Base directory:   " + _baseDir.getAbsolutePath());
+            System.err.println("Config directory: " + _configDir.getAbsolutePath());
+            System.err.println("Router directory: " + _routerDir.getAbsolutePath());
+            System.err.println("App directory:    " + _appDir.getAbsolutePath());
+            System.err.println("Log directory:    " + _logDir.getAbsolutePath());
+            System.err.println("PID directory:    " + _pidDir.getAbsolutePath());
+            System.err.println("Temp directory:   " + getTempDir().getAbsolutePath());
+        }
 
         if (doInit) {
             // Bad practice, sets a static field to this in constructor.
@@ -436,8 +436,8 @@ public class I2PAppContext {
                         System.err.println("ERROR: Could not create temp dir " + _tmpDir.getAbsolutePath());
                 }
             }
+            return _tmpDir;
         }
-        return _tmpDir;
     }
 
     /** don't rely on deleteOnExit() */
@@ -678,28 +678,7 @@ public class I2PAppContext {
             _elGamalEngineInitialized = true;
         }
     }
-    
-    /**
-     * Access the ElGamal/AES+SessionTag engine for this context.  The algorithm
-     * makes use of the context's sessionKeyManager to coordinate transparent
-     * access to the sessionKeys and sessionTags, as well as the context's elGamal
-     * engine (which in turn keeps stats, etc).
-     *
-     */
-    public ElGamalAESEngine elGamalAESEngine() {
-        if (!_elGamalAESEngineInitialized)
-            initializeElGamalAESEngine();
-        return _elGamalAESEngine;
-    }
 
-    private void initializeElGamalAESEngine() {
-        synchronized (_lock6) {
-            if (_elGamalAESEngine == null)
-                _elGamalAESEngine = new ElGamalAESEngine(this);
-            _elGamalAESEngineInitialized = true;
-        }
-    }
-    
     /**
      * Ok, I'll admit it.  there is no good reason for having a context specific
      * AES engine.  We dont really keep stats on it, since its just too fast to
@@ -715,10 +694,7 @@ public class I2PAppContext {
     private void initializeAESEngine() {
         synchronized (_lock7) {
             if (_AESEngine == null) {
-                if ("off".equals(getProperty("i2p.encryption", "on")))
-                    _AESEngine = new AESEngine(this);
-                else
-                    _AESEngine = new CryptixAESEngine(this);
+                _AESEngine = new CryptixAESEngine(this);
             }
             _AESEngineInitialized = true;
         }
@@ -767,8 +743,9 @@ public class I2PAppContext {
         }
     }
 
-    /** @deprecated used only by syndie */
-    @Deprecated
+    /**
+     * Un-deprecated in 0.9.38
+     */
     public HMAC256Generator hmac256() {
         if (!_hmac256Initialized)
             initializeHMAC256();

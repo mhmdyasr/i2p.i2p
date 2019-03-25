@@ -1,5 +1,8 @@
-apply plugin: 'java-library'
-apply plugin: 'scala'
+plugins {
+    id 'java-library'
+    id 'scala'
+    id 'me.champeau.gradle.jmh' version '0.4.8'
+}
 
 archivesBaseName = 'i2p'
 
@@ -27,9 +30,15 @@ sourceSets {
         }
         resources {
             srcDir 'java/test/junit'
+            include 'resources/*'
             include 'net/i2p/crypto/eddsa/test.data'
             include 'net/i2p/crypto/eddsa/math/baseDblPrecmp'
             include 'net/i2p/crypto/eddsa/math/basePrecmp'
+        }
+    }
+    jmh {
+        java {
+            srcDir 'java/bench'
         }
     }
 }
@@ -38,11 +47,15 @@ dependencies {
     implementation 'gnu.getopt:java-getopt:1.0.13'
     implementation 'org.gnu.gettext:libintl:0.18.3'
 
+    if (project.hasProperty("with.jbigi")) {
+        runtimeOnly project(path: ':installer', configuration: 'jbigi')
+    }
+
     testCompile "org.scala-lang:scala-library:2.12.4"
     testCompile 'org.scalatest:scalatest_2.12:3.0.4'
 }
 
-if (JavaVersion.current() != JavaVersion.VERSION_1_7) {
+if (System.getenv("TARGET_JAVA_HOME") == null && JavaVersion.current() != JavaVersion.VERSION_1_7) {
     sourceSets {
         test {
             scala {

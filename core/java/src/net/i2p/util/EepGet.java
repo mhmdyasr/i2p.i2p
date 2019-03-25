@@ -557,7 +557,7 @@ public class EepGet {
             System.out.println("** " + new Date());
             System.out.println("** Attempt " + currentAttempt + " of " + url + " failed");
             System.out.println("** Transfered " + bytesTransferred
-                               + " with " + (bytesRemaining < 0 ? "unknown" : ""+bytesRemaining) + " remaining");
+                               + " with " + (bytesRemaining < 0 ? "unknown" : Long.toString(bytesRemaining)) + " remaining");
             System.out.println("** " + cause.getMessage());
             _previousWritten += _written;
             _written = 0;
@@ -566,7 +566,7 @@ public class EepGet {
             System.out.println("== " + new Date());
             System.out.println("== Transfer of " + url + " failed after " + currentAttempt + " attempts");
             System.out.println("== Transfer size: " + bytesTransferred + " with "
-                               + (bytesRemaining < 0 ? "unknown" : ""+bytesRemaining) + " remaining");
+                               + (bytesRemaining < 0 ? "unknown" : Long.toString(bytesRemaining)) + " remaining");
             long timeToSend = _context.clock().now() - _startedOn;
             System.out.println("== Transfer time: " + DataHelper.formatDuration(timeToSend));
             double kbps = (timeToSend > 0 ? (1000.0d*(bytesTransferred)/(timeToSend*1024.0d)) : 0);
@@ -1124,7 +1124,7 @@ public class EepGet {
                     increment(lookahead, cur);
             }
             
-            if (buf.length() > 1024)
+            if (buf.length() > 4096)
                 throw new IOException("Header line too long: " + buf.toString());
         }
     }
@@ -1169,8 +1169,9 @@ public class EepGet {
      * @return HTTP response code (200, 206, other)
      */
     private int handleStatus(String line) {
+        line = line.trim();
         if (_log.shouldLog(Log.DEBUG))
-            _log.debug("Status line: [" + line.trim() + "]");
+            _log.debug("Status line: [" + line + "]");
         String[] toks = DataHelper.split(line, " ", 3);
         if (toks.length < 2) {
             if (_log.shouldLog(Log.WARN))

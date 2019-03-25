@@ -89,7 +89,7 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                                          "\r\n";
     // ESR version of Firefox, same as Tor Browser
     private static final String UA_CLEARNET = "User-Agent: " +
-                                              "Mozilla/5.0 (Windows NT 6.1; rv:52.0) Gecko/20100101 Firefox/52.0" +
+                                              "Mozilla/5.0 (Windows NT 6.1; rv:60.0) Gecko/20100101 Firefox/60.0" +
                                               "\r\n";
 
     /**
@@ -367,12 +367,12 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
     public static final String PROP_VIA = "i2ptunnel.httpclient.sendVia";
     public static final String PROP_JUMP_SERVERS = "i2ptunnel.httpclient.jumpServers";
     public static final String PROP_DISABLE_HELPER = "i2ptunnel.httpclient.disableAddressHelper";
-    /** @since 0.9.11 */
-    public static final String PROP_SSL_OUTPROXIES = "i2ptunnel.httpclient.SSLOutproxies";
     /** @since 0.9.14 */
     public static final String PROP_ACCEPT = "i2ptunnel.httpclient.sendAccept";
-    /** @since 0.9.14 */
+    /** @since 0.9.14, overridden to true as of 0.9.35 unlesss PROP_SSL_SET is set */
     public static final String PROP_INTERNAL_SSL = "i2ptunnel.httpclient.allowInternalSSL";
+    /** @since 0.9.35 */
+    public static final String PROP_SSL_SET = "sslManuallySet";
 
     /**
      *
@@ -404,6 +404,7 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
             out = s.getOutputStream();
             InputReader reader = new InputReader(s.getInputStream());
             String line, method = null, protocol = null, host = null, destination = null;
+            String hostLowerCase = null;
             StringBuilder newRequest = new StringBuilder();
             boolean ahelperPresent = false;
             boolean ahelperNew = false;
@@ -413,6 +414,7 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
             int remotePort = 0;
             String referer = null;
             URI origRequestURI = null;
+            boolean preserveConnectionHeader = false;
             while((line = reader.readLine(method)) != null) {
                 line = line.trim();
                 if(_log.shouldLog(Log.DEBUG)) {
@@ -420,11 +422,6 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                 }
 
                 String lowercaseLine = line.toLowerCase(Locale.US);
-                if(lowercaseLine.startsWith("connection: ") ||
-                        lowercaseLine.startsWith("keep-alive: ") ||
-                        lowercaseLine.startsWith("proxy-connection: ")) {
-                    continue;
-                }
 
                 if(method == null) { // first line (GET /base64/realaddr)
                     if(_log.shouldLog(Log.DEBUG)) {
@@ -505,9 +502,12 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                             if (idx > 0) {
                                 String schemeHostPort = request.substring(0, idx);
                                 String rest = request.substring(idx);
+                                // not escaped by all browsers, may be specific to query, see ticket #2130
                                 rest = rest.replace("[", "%5B");
                                 rest = rest.replace("]", "%5D");
                                 rest = rest.replace("|", "%7C");
+                                rest = rest.replace("{", "%7B");
+                                rest = rest.replace("}", "%7D");
                                 String testRequest = schemeHostPort + rest;
                                 if (!testRequest.equals(request)) {
                                     try {
@@ -579,7 +579,7 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                     // in our addressbook (all naming is local),
                     // and it is removed from the request line.
 
-                    String hostLowerCase = host.toLowerCase(Locale.US);
+                    hostLowerCase = host.toLowerCase(Locale.US);
                     if(hostLowerCase.equals(LOCAL_SERVER)) {
                         // so we don't do any naming service lookups
                         destination = host;
@@ -773,19 +773,23 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                                             out.write(("</a></th>\n<th align=\"center\">" +
                                                        "<a href=\"" + conflictURL + "\">").getBytes("UTF-8"));
                                             out.write(_t("Conflicting address helper destination").getBytes("UTF-8"));
-                                            out.write(("</a></th></tr>\n<tr><td align=\"center\">" +
+                                            out.write(("</a></th></tr>\n").getBytes("UTF-8"));
+                                            if (_context.portMapper().isRegistered(PortMapper.SVC_IMAGEGEN)) {
+                                                out.write(("<tr><td align=\"center\">" +
                                                        "<a href=\"" + trustedURL + "\">" +
                                                        "<img src=\"" +
                                                        conURL + "imagegen/id?s=160&amp;c=" +
                                                        h1.toBase64().replace("=", "%3d") +
-                                                      "\" width=\"160\" height=\"160\"></a>\n").getBytes("UTF-8"));
-                                            out.write(("</td>\n<td align=\"center\">" +
+                                                      "\" width=\"160\" height=\"160\"></a>\n" +
+                                                      "</td>\n<td align=\"center\">" +
                                                        "<a href=\"" + conflictURL + "\">" +
                                                        "<img src=\"" +
                                                        conURL + "imagegen/id?s=160&amp;c=" +
                                                        h2.toBase64().replace("=", "%3d") +
-                                                       "\" width=\"160\" height=\"160\"></a>\n").getBytes("UTF-8"));
-                                            out.write("</td></tr></table>".getBytes("UTF-8"));
+                                                       "\" width=\"160\" height=\"160\"></a>\n" +
+                                                       "</td></tr>").getBytes("UTF-8"));
+                                            }
+                                            out.write("</table>".getBytes("UTF-8"));
                                         }
                                         out.write("</div>".getBytes("UTF-8"));
                                         writeFooter(out);
@@ -863,9 +867,9 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                             }
                             if ("https".equals(protocol) ||
                                 method.toUpperCase(Locale.US).equals("CONNECT"))
-                                currentProxy = selectSSLProxy();
+                                currentProxy = selectSSLProxy(hostLowerCase);
                             else
-                                currentProxy = selectProxy();
+                                currentProxy = selectProxy(hostLowerCase);
                             if(_log.shouldLog(Log.DEBUG)) {
                                 _log.debug("After selecting outproxy for " + host + ": " + currentProxy);
                             }
@@ -935,12 +939,22 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                 // end first line processing
 
                 } else {
-                    if(lowercaseLine.startsWith("host: ") && !usingWWWProxy && !usingInternalOutproxy) {
+                    if (lowercaseLine.startsWith("connection: ")) {
+                        if (lowercaseLine.contains("upgrade")) {
+                            // pass through for websocket
+                            preserveConnectionHeader = true;
+                        } else {
+                            continue;
+                        }
+                    } else if (lowercaseLine.startsWith("keep-alive: ") ||
+                               lowercaseLine.startsWith("proxy-connection: ")) {
+                        continue;
+                    } else if (lowercaseLine.startsWith("host: ") && !usingWWWProxy && !usingInternalOutproxy) {
                         // Note that we only pass the original Host: line through to the outproxy
                         // But we don't create a Host: line if it wasn't sent to us
                         line = "Host: " + host;
-                        if(_log.shouldLog(Log.INFO)) {
-                            _log.info(getPrefix(requestId) + "Setting host = " + host);
+                        if (_log.shouldDebug()) {
+                            _log.debug(getPrefix(requestId) + "Setting host = " + host);
                         }
                     } else if(lowercaseLine.startsWith("user-agent: ")) {
                         // save for deciding whether to offer address book form
@@ -948,6 +962,23 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                         if(!Boolean.parseBoolean(getTunnel().getClientOptions().getProperty(PROP_USER_AGENT))) {
                             line = null;
                             continue;
+                        }
+                    } else if(lowercaseLine.startsWith("accept: ")) {
+                        if (!Boolean.parseBoolean(getTunnel().getClientOptions().getProperty(PROP_ACCEPT))) {
+                            // Replace with a standard one if possible
+                            boolean html = lowercaseLine.indexOf("text/html") > 0;
+                            boolean css = lowercaseLine.indexOf("text/css") > 0;
+                            boolean img = lowercaseLine.indexOf("image") > 0;
+                            if (html && !img && !css) {
+                                // firefox, tor browser
+                                line = "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+                            } else if (img && !html && !css) {
+                                // chrome
+                                line = "Accept: image/webp,image/apng,image/*,*/*;q=0.8";
+                            } else if (css && !html && !img) {
+                                // chrome, firefox
+                                line = "Accept: text/css,*/*;q=0.1";
+                            }  // else allow as-is
                         }
                     } else if(lowercaseLine.startsWith("accept")) {
                         // strip the accept-blah headers, as they vary dramatically from
@@ -1059,7 +1090,10 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                                     .append("\r\n");
                         }
                     }
-                    newRequest.append("Connection: close\r\n\r\n");
+                    if (preserveConnectionHeader)
+                        newRequest.append("\r\n");
+                    else
+                        newRequest.append("Connection: close\r\n\r\n");
                     s.setSoTimeout(0);
                     break;
                 } else {
@@ -1170,18 +1204,29 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                 }
             } else if("i2p".equals(host)) {
                 clientDest = null;
-            } else if(destination.length() == 60 && destination.toLowerCase(Locale.US).endsWith(".b32.i2p")) {
+            } else if (destination.length() >= 60 && destination.toLowerCase(Locale.US).endsWith(".b32.i2p")) {
                 // use existing session to look up for efficiency
                 verifySocketManager();
                 I2PSession sess = sockMgr.getSession();
-                if(!sess.isClosed()) {
-                    byte[] hData = Base32.decode(destination.substring(0, 52));
-                    if(hData != null) {
-                        if(_log.shouldLog(Log.INFO)) {
-                            _log.info("lookup in-session " + destination);
+                if (!sess.isClosed()) {
+                    int len = destination.length();
+                    if (len == 60) {
+                        byte[] hData = Base32.decode(destination.substring(0, 52));
+                        if (hData != null) {
+                            if (_log.shouldInfo())
+                                _log.info("lookup b32 in-session " + destination);
+                            Hash hash = Hash.create(hData);
+                            clientDest = sess.lookupDest(hash, 20*1000);
+                        } else {
+                            clientDest = null;
                         }
-                        Hash hash = Hash.create(hData);
-                        clientDest = sess.lookupDest(hash, 20 * 1000);
+                    } else if (len >= 64) {
+                        if (_log.shouldInfo())
+                            _log.info("lookup b33 in-session " + destination);
+                        clientDest = sess.lookupDest(destination, 20*1000);
+                    } else {
+                        // 61-63 chars, this won't work
+                        clientDest = _context.namingService().lookup(destination);
                     }
                 } else {
                     clientDest = _context.namingService().lookup(destination);
@@ -1224,9 +1269,11 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                 return;
             }
 
+            // as of 0.9.35, allowInternalSSL defaults to true, and overridden to true unless PROP_SSL_SET is set
             if (method.toUpperCase(Locale.US).equals("CONNECT") &&
                 !usingWWWProxy &&
-                !Boolean.parseBoolean(getTunnel().getClientOptions().getProperty(PROP_INTERNAL_SSL))) {
+                getTunnel().getClientOptions().getProperty(PROP_SSL_SET) != null &&
+                !Boolean.parseBoolean(getTunnel().getClientOptions().getProperty(PROP_INTERNAL_SSL, "true"))) {
                 try {
                     writeErrorMessage(ERR_INTERNAL_SSL, out, targetRequest, false, destination);
                 } catch (IOException ioe) {
@@ -1255,7 +1302,7 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
             // and not pass the parameter to the eepsite.
             // This also prevents the not-found error page from looking bad
             // Syndie can't handle a redirect of a POST
-            if(ahelperPresent && !"POST".equals(method)) {
+            if (ahelperPresent && !"POST".equals(method) && !"PUT".equals(method)) {
                 String uri = targetRequest;
                 if(_log.shouldLog(Log.DEBUG)) {
                     _log.debug("Auto redirecting to " + uri);
@@ -1281,9 +1328,11 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
             if (remotePort > 0)
                 sktOpts.setPort(remotePort);
             i2ps = createI2PSocket(clientDest, sktOpts);
-            OnTimeout onTimeout = new OnTimeout(s, s.getOutputStream(), targetRequest, usingWWWProxy, currentProxy, requestId);
-            Thread t;
-            if (method.toUpperCase(Locale.US).equals("CONNECT")) {
+            boolean isConnect = method.toUpperCase(Locale.US).equals("CONNECT");
+            OnTimeout onTimeout = new OnTimeout(s, s.getOutputStream(), targetRequest, usingWWWProxy,
+                                                currentProxy, requestId, hostLowerCase, isConnect);
+            I2PTunnelRunner t;
+            if (isConnect) {
                 byte[] data;
                 byte[] response;
                 if (usingWWWProxy) {
@@ -1298,6 +1347,9 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
                 byte[] data = newRequest.toString().getBytes("ISO-8859-1");
                 t = new I2PTunnelHTTPClientRunner(s, i2ps, sockLock, data, mySockets, onTimeout);
             }
+            if (usingWWWProxy) {
+                t.setSuccessCallback(new OnProxySuccess(currentProxy, hostLowerCase, isConnect));
+            }
             // we are called from an unlimited thread pool, so run inline
             //t.start();
             t.run();
@@ -1308,38 +1360,18 @@ public class I2PTunnelHTTPClient extends I2PTunnelHTTPClientBase implements Runn
             handleClientException(ex, out, targetRequest, usingWWWProxy, currentProxy, requestId);
         } catch(I2PException ex) {
             if(_log.shouldLog(Log.INFO)) {
-                _log.info("getPrefix(requestId) + Error trying to connect", ex);
+                _log.info(getPrefix(requestId) + "Error trying to connect", ex);
             }
             handleClientException(ex, out, targetRequest, usingWWWProxy, currentProxy, requestId);
         } catch(OutOfMemoryError oom) {
             IOException ex = new IOException("OOM");
-            _log.error("getPrefix(requestId) + Error trying to connect", oom);
+            _log.error(getPrefix(requestId) + "Error trying to connect", oom);
             handleClientException(ex, out, targetRequest, usingWWWProxy, currentProxy, requestId);
         } finally {
             // only because we are running it inline
             closeSocket(s);
             if (i2ps != null) try { i2ps.close(); } catch (IOException ioe) {}
         }
-    }
-
-    /**
-     *  Unlike selectProxy(), we parse the option on the fly so it
-     *  can be changed. selectProxy() requires restart...
-     *  @return null if none
-     *  @since 0.9.11
-     */
-    private String selectSSLProxy() {
-        String s = getTunnel().getClientOptions().getProperty(PROP_SSL_OUTPROXIES);
-        if (s == null)
-            return null;
-        String[] p = DataHelper.split(s, "[,; \r\n\t]");
-        if (p.length == 0)
-            return null;
-        // todo doesn't check for ""
-        if (p.length == 1)
-            return p[0];
-        int i = _context.random().nextInt(p.length);
-        return p[i];
     }
 
     /** @since 0.8.7 */

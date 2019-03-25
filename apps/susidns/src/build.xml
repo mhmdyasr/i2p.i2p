@@ -18,6 +18,7 @@
 		<pathelement location="${lib}/javax.servlet.jar"/>
 
                 <!-- following jars only present for debian builds -->
+                <pathelement location="${lib}/commons-logging.jar" />
                 <pathelement location="${lib}/jsp-api.jar" />
                 <pathelement location="${lib}/tomcat-api.jar" />
                 <pathelement location="${lib}/tomcat-util.jar" />
@@ -28,8 +29,8 @@
 		<pathelement location="lib/jstl.jar" />
 		<pathelement location="lib/standard.jar" />
 		<pathelement location="${lib}/jasper-runtime.jar" />
-		<pathelement location="${lib}/commons-logging.jar" />
 		<pathelement location="${lib}/jetty-util.jar" />
+		<pathelement location="${lib}/jetty-i2p.jar" />
 		<pathelement location="${ant.home}/lib/ant.jar" />
 		<pathelement location="../../../core/java/build/i2p.jar" />
 		<pathelement location="../../addressbook/dist/addressbook.jar" />
@@ -52,12 +53,30 @@
 		</javac>
 	</target>
 
-    <target name="precompilejsp" unless="precompilejsp.uptodate">
+    <target name="verifylibtaglibs" if="${with-libtaglibs-standard}" >
+        <!-- lib/jstlel.jar should be a symlink to the package jar.
+           - If the package jar is not there, we will still compile fine but it won't run,
+           - so catch it here.
+          -->
+        <fail message="libtaglibs-standard-jstlel-java package must be installed for debian builds">
+            <condition>
+                <not><available file="lib/jstlel.jar" type="file"/></not>
+            </condition>
+        </fail>
+    </target>
+
+    <target name="precompilejsp" depends="verifylibtaglibs" unless="precompilejsp.uptodate">
         <delete file="WEB-INF/web-fragment.xml" />
         <delete file="WEB-INF/web-out.xml" />
     	<mkdir dir="${tmp}" />
         <echo message="Ignore any warning about /WEB-INF/web.xml not found" />
-        <java classname="org.apache.jasper.JspC" fork="true" classpathref="cp" failonerror="true">
+        <!-- See apps/routerconsole/java/build.xml for important JspC build documentation -->
+        <java classname="net.i2p.servlet.util.JspC" fork="true" classpathref="cp" failonerror="true">
+            <!-- these are to detect tomcat version and reproducible build setting -->
+            <jvmarg value="-Dbuild.reproducible=${build.reproducible}" />
+            <jvmarg value="-Dwith-libtomcat8-java=${with-libtomcat8-java}" />
+            <jvmarg value="-Dwith-libtomcat9-java=${with-libtomcat9-java}" />
+            <jvmarg value="-Djasper.jar=${lib}/jasper-runtime.jar" />
             <arg value="-d" />
             <arg value="${tmp}" />
             <arg value="-v" />
@@ -77,6 +96,19 @@
         <loadfile property="jspc.web.fragment" srcfile="WEB-INF/web-fragment.xml" />
         <replace file="WEB-INF/web-out.xml">
             <replacefilter token="&lt;!-- precompiled servlets --&gt;" value="${jspc.web.fragment}" />
+        </replace>
+        <!-- Add multipart config to servlets that need them -->
+        <property name="__match1" value="&lt;servlet-class&gt;i2p.susi.dns.jsp." />
+        <property name="__match2" value="_jsp&lt;/servlet-class&gt;" />
+        <property name="__class1" value="${__match1}addressbook${__match2}" />
+        <property name="__multipart" value="&#10;
+       &lt;multipart-config&gt;&#10;
+           &lt;max-file-size&gt;67108864&lt;/max-file-size&gt;&#10;
+           &lt;max-request-size&gt;67108864&lt;/max-request-size&gt;&#10;
+           &lt;file-size-threshold&gt;262144&lt;/file-size-threshold&gt;&#10;
+       &lt;/multipart-config&gt;" />
+        <replace file="WEB-INF/web-out.xml">
+            <replacefilter token="${__class1}" value="${__class1}${__multipart}" />
         </replace>
     </target>
 
@@ -106,13 +138,7 @@
         <war destfile="${project}.war" webxml="WEB-INF/web-out.xml">
         	<fileset dir=".">
         		<include name="WEB-INF/**/*.class"/>
-                     <!-- pulled out of the jar in 0.7.12
-        		<include name="WEB-INF/lib/*.jar"/>
-                      -->
-        		<include name="images/*.png"/>
-        		<include name="css.css"/>
-        		<include name="index.html"/>
-        		<include name="WEB-INF/classes/${project}.properties"/>
+        		<include name="svg/*"/>
         	</fileset>
             <manifest>
                 <attribute name="Implementation-Version" value="${full.version}" />
@@ -128,7 +154,7 @@
 
     <target name="warUpToDate">
         <uptodate property="war.uptodate" targetfile="${project}.war">
-            <srcfiles dir= "." includes="WEB-INF/web-out.xml WEB-INF/**/*.class images/*.png css.css index.html WEB-INF/classes/${project}.properties" />
+            <srcfiles dir= "." includes="WEB-INF/web-out.xml WEB-INF/**/*.class svg/*" />
         </uptodate>
         <condition property="shouldListChanges" >
             <and>
@@ -162,7 +188,19 @@
         </javac>
     </target>
 
-    <target name="poupdate" depends="compile, precompilejsp">
+    <target name="extractSVGTags">
+        <mkdir dir="build/" />
+        <java classname="net.i2p.util.TranslateReader" fork="true" failonerror="true">
+            <classpath>
+                <pathelement location="../../../build/i2p.jar" />
+            </classpath>
+            <arg value="tag" />
+            <arg value="svg/" />
+            <arg value="build/HowSVG.java" />
+        </java>
+    </target>
+
+    <target name="poupdate" depends="compile, precompilejsp, extractSVGTags">
         <!-- Update the messages_*.po files.  -->
         <!-- set if unset -->
         <property name="lg2" value="" />

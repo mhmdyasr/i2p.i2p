@@ -31,6 +31,9 @@ import net.i2p.util.PasswordManager;
  * Helper class to generate a valid TunnelController configuration from provided
  * settings.
  *
+ * This class is also used by Android.
+ * Maintain as a stable API and take care not to break Android.
+ *
  * @since 0.9.19 logic moved from IndexBean
  */
 public class TunnelConfig {
@@ -597,8 +600,11 @@ public class TunnelConfig {
             if (_port >= 0)
                 config.setProperty(TunnelController.PROP_LISTEN_PORT, Integer.toString(_port));
             config.setProperty(TunnelController.PROP_SHARED, _sharedClient + "");
+            // see I2PTunnelHTTPClient
+            if (TunnelController.TYPE_HTTP_CLIENT.equals(_type))
+                _booleanOptions.add(I2PTunnelHTTPClient.PROP_SSL_SET);
             for (String p : _booleanClientOpts)
-                config.setProperty(OPT + p, "" + _booleanOptions.contains(p));
+                config.setProperty(OPT + p, Boolean.toString(_booleanOptions.contains(p)));
             for (String p : _otherClientOpts) {
                 if (_otherOptions.containsKey(p))
                     config.setProperty(OPT + p, _otherOptions.get(p));
@@ -610,7 +616,7 @@ public class TunnelConfig {
             // see TunnelController.setConfig()
             _booleanOptions.add(TunnelController.PROP_LIMITS_SET);
             for (String p : _booleanServerOpts)
-                config.setProperty(OPT + p, "" + _booleanOptions.contains(p));
+                config.setProperty(OPT + p, Boolean.toString(_booleanOptions.contains(p)));
             for (String p : _otherServerOpts) {
                 if (_otherOptions.containsKey(p))
                     config.setProperty(OPT + p, _otherOptions.get(p));
@@ -628,7 +634,7 @@ public class TunnelConfig {
         if (TunnelController.TYPE_HTTP_CLIENT.equals(_type) || TunnelController.TYPE_CONNECT.equals(_type) || 
             TunnelController.TYPE_SOCKS.equals(_type) ||TunnelController.TYPE_SOCKS_IRC.equals(_type)) {
             for (String p : _booleanProxyOpts)
-                config.setProperty(OPT + p, "" + _booleanOptions.contains(p));
+                config.setProperty(OPT + p, Boolean.toString(_booleanOptions.contains(p)));
             if (_proxyList != null)
                 config.setProperty(TunnelController.PROP_PROXIES, _proxyList);
         }
@@ -699,7 +705,7 @@ public class TunnelConfig {
         if (TunnelController.TYPE_IRC_CLIENT.equals(_type)) {
             boolean dcc = _booleanOptions.contains(I2PTunnelIRCClient.PROP_DCC);
             config.setProperty(OPT + I2PTunnelIRCClient.PROP_DCC,
-                               "" + dcc);
+                               Boolean.toString(dcc));
             // add some sane server options since they aren't in the GUI (yet)
             if (dcc) {
                 config.setProperty(OPT + PROP_MAX_CONNS_MIN, "3");
@@ -756,7 +762,8 @@ public class TunnelConfig {
         I2PTunnelHTTPClient.PROP_USER_AGENT,
         I2PTunnelHTTPClient.PROP_REFERER,
         I2PTunnelHTTPClient.PROP_ACCEPT,
-        I2PTunnelHTTPClient.PROP_INTERNAL_SSL
+        I2PTunnelHTTPClient.PROP_INTERNAL_SSL,
+        I2PTunnelHTTPClient.PROP_SSL_SET
         };
     private static final String _booleanServerOpts[] = {
         "i2cp.reduceOnIdle", "i2cp.encryptLeaseSet", PROP_ENABLE_ACCESS_LIST, PROP_ENABLE_BLACKLIST,
@@ -804,8 +811,8 @@ public class TunnelConfig {
         "proxyUsername", "proxyPassword"
         };
 
-    public static final Set<String> _noShowSet = new HashSet<String>(128);
-    public static final Set<String> _nonProxyNoShowSet = new HashSet<String>(4);
+    static final Set<String> _noShowSet = new HashSet<String>(128);
+    static final Set<String> _nonProxyNoShowSet = new HashSet<String>(4);
     static {
         _noShowSet.addAll(Arrays.asList(_noShowOpts));
         _noShowSet.addAll(Arrays.asList(_booleanClientOpts));
@@ -829,7 +836,7 @@ public class TunnelConfig {
             if ( (_i2cpPort != null) && (_i2cpPort.trim().length() > 0) ) {
                 config.setProperty(TunnelController.PROP_I2CP_PORT, _i2cpPort);
             } else {
-                config.setProperty(TunnelController.PROP_I2CP_PORT, "7654");
+                config.setProperty(TunnelController.PROP_I2CP_PORT, Integer.toString(I2PClient.DEFAULT_LISTEN_PORT));
             }
         }
         if (_privKeyFile != null)

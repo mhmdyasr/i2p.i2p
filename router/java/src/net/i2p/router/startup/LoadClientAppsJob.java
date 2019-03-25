@@ -56,14 +56,18 @@ public class LoadClientAppsJob extends JobImpl {
                 continue;
             }
             String argVal[] = parseArgs(app.args);
-            if (app.delay <= 0) {
+            if (app.delay == 0) {
                 // run this guy now
                 runClient(app.className, app.clientName, argVal, getContext(), _log);
-            } else {
+            } else if (app.delay > 0) {
                 // wait before firing it up
                 DelayedRunClient drc = new DelayedRunClient(getContext().simpleTimer2(), getContext(), app.className,
                                                             app.clientName, argVal);
                 drc.schedule(app.delay);
+            } else {
+                WaitForRunningClient wfrc = new WaitForRunningClient(getContext().simpleTimer2(), getContext(),
+                                                                app.className, app.clientName, argVal);
+                wfrc.schedule(1000);
             }
         }
     }
@@ -72,7 +76,7 @@ public class LoadClientAppsJob extends JobImpl {
      *  Public for router console only, not for use by others, subject to change
      */
     public static class DelayedRunClient extends SimpleTimer2.TimedEvent {
-        private final RouterContext _ctx;
+        protected final RouterContext _ctx;
         private final String _className;
         private final String _clientName;
         private final String _args[];
@@ -103,6 +107,21 @@ public class LoadClientAppsJob extends JobImpl {
             runClient(_className, _clientName, _args, _ctx, _log, _threadGroup, _cl);
         }
     }
+
+    private static class WaitForRunningClient extends DelayedRunClient {
+        WaitForRunningClient(SimpleTimer2 pool, RouterContext enclosingContext, String className, String clientName,
+                             String args[]) {
+            super(pool, enclosingContext, className, clientName, args, null, null);
+        }
+
+        public void timeReached() {
+            if (!_ctx.router().isRunning()) {
+                 reschedule(1000);
+                 return;
+            }
+            super.timeReached();
+        }
+    }
     
     /**
      *  Parse arg string into an array of args.
@@ -117,18 +136,18 @@ public class LoadClientAppsJob extends JobImpl {
     public static String[] parseArgs(String args) {
         List<String> argList = new ArrayList<String>(4);
         if (args != null) {
-            char data[] = args.toCharArray();
             StringBuilder buf = new StringBuilder(32);
             boolean isQuoted = false;
-            for (int i = 0; i < data.length; i++) {
-                switch (data[i]) {
+            for (int i = 0; i < args.length(); i++) {
+                char c = args.charAt(i);
+                switch (c) {
                     case '\'':
                     case '"':
                         if (isQuoted) {
                             String str = buf.toString().trim();
                             if (str.length() > 0)
                                 argList.add(str);
-                            buf = new StringBuilder(32);
+                            buf.setLength(0);
                         }
                         isQuoted = !isQuoted;
                         break;
@@ -137,16 +156,16 @@ public class LoadClientAppsJob extends JobImpl {
                         // whitespace - if we're in a quoted section, keep this as part of the quote,
                         // otherwise use it as a delim
                         if (isQuoted) {
-                            buf.append(data[i]);
+                            buf.append(c);
                         } else {
                             String str = buf.toString().trim();
                             if (str.length() > 0)
                                 argList.add(str);
-                            buf = new StringBuilder(32);
+                            buf.setLength(0);
                         }
                         break;
                     default:
-                        buf.append(data[i]);
+                        buf.append(c);
                         break;
                 }
             }
@@ -315,12 +334,6 @@ public class LoadClientAppsJob extends JobImpl {
             } catch (Throwable t) {}
             return false;
         }
-
-
-
-
-
-
     }
 
     public String getName() { return "Load up any client applications"; }

@@ -23,7 +23,6 @@
  */
 package i2p.susi.webmail;
 
-import i2p.susi.debug.Debug;
 import i2p.susi.util.Buffer;
 import i2p.susi.util.Config;
 import i2p.susi.util.CountingInputStream;
@@ -38,6 +37,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -51,6 +51,7 @@ import java.util.regex.Pattern;
 import net.i2p.I2PAppContext;
 import net.i2p.data.DataHelper;
 import net.i2p.servlet.util.ServletUtil;
+import net.i2p.util.Log;
 import net.i2p.util.RFC822Date;
 import net.i2p.util.SystemVersion;
 
@@ -96,6 +97,7 @@ class Mail {
 	public String error;
 
 	public boolean markForDeletion;
+	private final Log _log;
 	
 	public Mail(String uidl) {
 		this.uidl = uidl;
@@ -108,6 +110,7 @@ class Mail {
 		shortSubject = "";
 		quotedDate = unknown;
 		error = "";
+		_log = I2PAppContext.getGlobalContext().logManager().getLog(Mail.class);
 	}
 
 	/**
@@ -186,9 +189,9 @@ class Mail {
 			size = rb.getLength();
 			success = true;
 		} catch (IOException de) {
-			Debug.debug(Debug.ERROR, "Decode error", de);
+			_log.error("Decode error", de);
 		} catch (RuntimeException e) {
-			Debug.debug(Debug.ERROR, "Parse error", e);
+			_log.error("Parse error", e);
 		} finally {
 			if (in != null) try { in.close(); } catch (IOException ioe) {}
 			rb.readComplete(success);
@@ -300,6 +303,23 @@ class Mail {
 	{
 		if( text != null && text.length() > 0 ) {			
 			String[] ccs = DataHelper.split(text, ",");
+			ok = getRecipientsFromList(recipients, ccs, ok);
+		}
+		return ok;
+	}
+
+	/**
+	 * A little misnamed. Adds all addresses from the elements
+	 * in text to the recipients list.
+	 * 
+	 * @param recipients out param
+	 * @param ok will be returned
+	 * @return true if ALL e-mail addresses are valid AND the in parameter was true
+	 * @since 0.9.35
+	 */
+	public static boolean getRecipientsFromList( ArrayList<String> recipients, String[] ccs, boolean ok )
+	{
+		if (ccs != null && ccs.length > 0 ) {			
 			for( int i = 0; i < ccs.length; i++ ) {
 				String recipient = ccs[i].trim();
 				if( validateAddress( recipient ) ) {
@@ -322,6 +342,7 @@ class Mail {
 	/**
 	 * Adds all items from the list
 	 * to the builder, separated by tabs.
+	 * This is for SMTP/POP.
 	 * 
 	 * @param buf out param
 	 * @param prefix prepended to the addresses
@@ -336,6 +357,31 @@ class Mail {
 				buf.append(',');
 			buf.append( "\r\n" );
 		}
+	}
+
+	/**
+	 * Adds all items from the array
+	 * to the builder, separated by commas
+	 * This is for display of a forwarded email.
+	 * 
+	 * @param prefix prepended to the addresses, includes trailing ": "
+	 * @since 0.9.35
+	 */
+	public static void appendRecipients(PrintWriter out, String[] recipients, String prefix)
+	{
+		StringBuilder buf = new StringBuilder(120);
+		buf.append(prefix);
+		for (int i = 0; i < recipients.length; i++) {
+			buf.append(recipients[i]);
+			if (i < recipients.length - 1)
+				buf.append(", ");
+			if (buf.length() > 75) {
+				out.println(buf);
+				buf.setLength(0);
+			}
+		}
+		if (buf.length() > 0)
+			out.println(buf);
 	}
 
 	private static final DateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd HH:mm");
@@ -393,7 +439,7 @@ class Mail {
 					MemoryBuffer decoded = new MemoryBuffer(4096);
 					hl.decode(eofin, decoded);
 					if (!eofin.wasFound())
-						Debug.debug(Debug.DEBUG, "EOF hit before \\r\\n\\r\\n in Mail");
+						if (_log.shouldDebug()) _log.debug("EOF hit before \\r\\n\\r\\n in Mail");
 					// Fixme UTF-8 to bytes to UTF-8
 					headerLines = DataHelper.split(new String(decoded.getContent(), decoded.getOffset(), decoded.getLength()), "\r\n");
 					for (int j = 0; j < headerLines.length; j++) {
@@ -484,7 +530,7 @@ class Mail {
 				}
 				catch( Exception e ) {
 					error += "Error parsing mail header: " + e.getClass().getName() + '\n';
-					Debug.debug(Debug.ERROR, "Parse error", e);
+					_log.error("Parse error", e);
 				}		
 			}
 		}

@@ -7,12 +7,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.security.GeneralSecurityException;
+import java.security.ProviderException;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.cert.X509CRL;
+import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -23,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.TreeSet;
 
 import javax.crypto.interfaces.DHPublicKey;
 import javax.crypto.spec.DHParameterSpec;
@@ -30,6 +33,7 @@ import javax.crypto.spec.DHPublicKeySpec;
 import javax.security.auth.x500.X500Principal;
 
 import static net.i2p.crypto.SigUtil.intToASN1;
+import net.i2p.crypto.eddsa.EdDSAPublicKey;
 import net.i2p.data.DataHelper;
 import net.i2p.data.Signature;
 import net.i2p.data.SigningPrivateKey;
@@ -141,7 +145,12 @@ public final class SelfSignedGenerator {
         SigningPrivateKey priv = (SigningPrivateKey) keys[1];
         PublicKey jpub = SigUtil.toJavaKey(pub);
         PrivateKey jpriv = SigUtil.toJavaKey(priv);
-        return generate(jpub, jpriv, priv, type, cname, altNames, ou, o, l, st, c, validDays);
+        try {
+            return generate(jpub, jpriv, priv, type, cname, altNames, ou, o, l, st, c, validDays);
+        } catch (ProviderException pe) {
+            // PE is unchecked
+            throw new GeneralSecurityException(pe);
+        }
     }
 
     /**
@@ -183,6 +192,7 @@ public final class SelfSignedGenerator {
         }
         byte[] sigoid = getEncodedOIDSeq(oid);
 
+        // ProviderException thrown here
         byte[] tbs = genTBS(cname, altNames, ou, o, l, st, c, validDays, sigoid, jpub);
         int tbslen = tbs.length;
 
@@ -232,13 +242,24 @@ public final class SelfSignedGenerator {
         } catch (IllegalArgumentException iae) {
             throw new GeneralSecurityException("cert error", iae);
         }
-        X509CRL crl = generateCRL(cert, validDays, 1, sigoid, jpriv);
+        X509CRL crl = generateCRL(cert, validDays, 1, sigoid, priv);
 
         // some simple tests
         PublicKey cpub = cert.getPublicKey();
         cert.verify(cpub);
-        if (!cpub.equals(jpub))
-            throw new GeneralSecurityException("pubkey mismatch");
+        if (!cpub.equals(jpub)) {
+            boolean ok = false;
+            if (cpub.getClass().getName().equals("sun.security.x509.X509Key")) {
+                // X509Certificate will sometimes contain an X509Key rather than the EdDSAPublicKey itself; the contained
+                // key is valid but needs to be instanced as an EdDSAPublicKey before it can be used.
+                try {
+                    cpub = new EdDSAPublicKey(new X509EncodedKeySpec(cpub.getEncoded()));
+                    ok = cpub.equals(jpub);
+                } catch (InvalidKeySpecException ex) {}
+            }
+            if (!ok)
+                throw new GeneralSecurityException("pubkey mismatch, in: " + jpub.getClass() + " cert: " + cpub.getClass());
+        }
         // todo crl tests
 
         Object[] rv = { jpub, jpriv, cert, crl };
@@ -280,10 +301,7 @@ public final class SelfSignedGenerator {
      *  Generate a CRL for the given cert, signed with the given private key
      */
     private static X509CRL generateCRL(X509Certificate cert, int validDays, int crlNum,
-                                       byte[] sigoid, PrivateKey jpriv) throws GeneralSecurityException {
-
-        SigningPrivateKey priv = SigUtil.fromJavaKey(jpriv);
-
+                                       byte[] sigoid, SigningPrivateKey priv) throws GeneralSecurityException {
         byte[] tbs = genTBSCRL(cert, validDays, crlNum, sigoid);
         int tbslen = tbs.length;
 
@@ -357,10 +375,10 @@ public final class SelfSignedGenerator {
         byte[] version = { (byte) 0xa0, 3, 2, 1, 2 };
 
         // positive serial number (long)
-        byte[] serial = new byte[10];
+        byte[] serial = new byte[11];
         serial[0] = 2;
-        serial[1] = 8;
-        RandomSource.getInstance().nextBytes(serial, 2, 8);
+        serial[1] = 9;
+        RandomSource.getInstance().nextBytes(serial, 2, 9);
         serial[2] &= 0x7f;
 
         // going to use this for both issuer and subject
@@ -381,6 +399,7 @@ public final class SelfSignedGenerator {
         byte[] validity = getValidity(validDays);
         byte[] subject = issuer;
 
+        // ProviderException thrown here
         byte[] pubbytes = jpub.getEncoded();
         byte[] extbytes = getExtensions(pubbytes, cname, altNames);
 
@@ -617,10 +636,14 @@ public final class SelfSignedGenerator {
         int ext3len = oid3.length + TRUE.length + spaceFor(wrap3len);
 
         int wrap41len = 0;
-        if (altNames == null)
-            altNames = new HashSet<String>(4);
-        else
+        // SEQUENCE doesn't have to be sorted, but let's do it for consistency,
+        // so it's platform-independent and the same after renewal
+        if (altNames == null) {
+            altNames = new TreeSet<String>();
+        } else {
+            altNames = new TreeSet<String>(altNames);
             altNames.remove("0:0:0:0:0:0:0:1");  // We don't want dup of "::1"
+        }
         altNames.add(cname);
         final boolean isCA = !cname.contains("@") && !cname.endsWith(".family.i2p.net");
         if (isCA) {

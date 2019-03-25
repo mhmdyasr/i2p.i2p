@@ -157,11 +157,9 @@ public class RouterInfo extends DatabaseEntry {
     }
 
     /**
-     * Retrieve the approximate date on which the info was published 
-     * (essentially a version number for the routerInfo structure, except that
-     * it also contains freshness information - whether or not the router is
-     * currently publishing its information).  This should be used to help expire
-     * old routerInfo structures
+     * Retrieve the timestamp on which the info was published,
+     * essentially a version number for the RouterInfo.
+     * This should be used to expire old RouterInfo structures.
      *
      */
     public long getPublished() {
@@ -338,15 +336,12 @@ public class RouterInfo extends DatabaseEntry {
         if (_published < 0) throw new DataFormatException("Invalid published date: " + _published);
 
             _identity.writeBytes(out);
-            // avoid thrashing objects
-            //DataHelper.writeDate(out, new Date(_published));
             DataHelper.writeLong(out, 8, _published);
+            // There shouldn't be any addresses when hidden, but if there are,
+            // write them out, so as not to invalidate the signature
             int sz = _addresses.size();
-            if (sz <= 0 || isHidden()) {
-                // Do not send IP address to peers in hidden mode
-                out.write((byte) 0);
-            } else {
-                out.write((byte) sz);
+            out.write((byte) sz);
+            if (sz > 0) {
                 for (RouterAddress addr : _addresses) {
                     addr.writeBytes(out);
                 }
@@ -490,6 +485,23 @@ public class RouterInfo extends DatabaseEntry {
         }
         return ret;
     }
+    
+    /**
+     *  For multiple addresses per-transport (IPv4 or IPv6)
+     *  Return addresses matching either of two styles
+     *
+     *  @return non-null
+     *  @since 0.9.35
+     */
+    public List<RouterAddress> getTargetAddresses(String transportStyle1, String transportStyle2) {
+        List<RouterAddress> ret = new ArrayList<RouterAddress>(_addresses.size());
+        for (RouterAddress addr :  _addresses) {
+            String style = addr.getTransportStyle();
+            if (style.equals(transportStyle1) || style.equals(transportStyle2))
+                ret.add(addr);
+        }
+        return ret;
+    }
 
     /**
      * Actually validate the signature
@@ -534,11 +546,15 @@ public class RouterInfo extends DatabaseEntry {
         // can't set the digest until we know the sig type
         InputStream din;
         MessageDigest digest;
+        SigType type = _identity.getSigningPublicKey().getType();
+        // Even if not verifying, we have to construct a Signature object
+        // below, which will fail for null type.
+        if (type == null)
+            throw new DataFormatException("unknown sig type");
         if (verifySig) {
-            SigType type = _identity.getSigningPublicKey().getType();
             if (type != SigType.EdDSA_SHA512_Ed25519) {
                 // This won't work for EdDSA
-                digest = _identity.getSigningPublicKey().getType().getDigestInstance();
+                digest = type.getDigestInstance();
                 // TODO any better way?
                 digest.update(_identity.toByteArray());
                 din = new DigestInputStream(in, digest);
@@ -557,14 +573,16 @@ public class RouterInfo extends DatabaseEntry {
         //else
         //    _published = when.getTime();
         _published = DataHelper.readLong(din, 8);
-        int numAddresses = (int) DataHelper.readLong(din, 1);
+        // EOF will be thrown in properties read below
+        int numAddresses = din.read();
         for (int i = 0; i < numAddresses; i++) {
             RouterAddress address = new RouterAddress();
             address.readBytes(din);
             _addresses.add(address);
         }
-        int numPeers = (int) DataHelper.readLong(din, 1);
-        if (numPeers == 0) {
+        // EOF will be thrown in properties read below
+        int numPeers = din.read();
+        if (numPeers <= 0) {
             _peers = null;
         } else {
             _peers = new HashSet<Hash>(numPeers);
@@ -575,14 +593,13 @@ public class RouterInfo extends DatabaseEntry {
             }
         }
         DataHelper.readProperties(din, _options);
-        _signature = new Signature(_identity.getSigningPublicKey().getType());
+        _signature = new Signature(type);
         _signature.readBytes(in);
 
         if (verifySig) {
-            SigType type = _identity.getSigningPublicKey().getType();
             if (type != SigType.EdDSA_SHA512_Ed25519) {
                 // This won't work for EdDSA
-                SimpleDataStructure hash = _identity.getSigningPublicKey().getType().getHashInstance();
+                SimpleDataStructure hash = type.getHashInstance();
                 hash.setData(digest.digest());
                 _isValid = DSAEngine.getInstance().verifySignature(_signature, hash, _identity.getSigningPublicKey());
                 _validated = true;

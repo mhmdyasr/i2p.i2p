@@ -1,4 +1,714 @@
+2019-03-22 zzz
+ * i2ptunnel: Escape {} in URLs (ticket #2130)
+
+* 2019-03-21 0.9.39 released
+
+2019-03-16 zzz
+ * Fix Debian builds with Jetty 9.4.15 (ticket #2457)
+
+2019-03-11 zab
+ * Startup: make negative client app delay value mean waiting 
+   for router to be RUNNING (ticket #2377)
+ * I2PTunnel: make I2PTunnel default to negative startup delay value
+   (ticket #2377)
+
+2019-03-11 zzz
+ * Console: New home page icons
+
+2019-03-09 zzz
+ * Data: Consolidate offline key check
+ * I2CP: Add support for blinding secret
+ * i2ptunnel: Prevent registration auth if key offline
+
+2019-03-07 zzz
+ * NetDB: Minor performance improvement in selectors
+
+2019-03-06 zzz
+ * NetDB: Fix flood version check, add version check for RedDSA
+
+2019-03-05 zzz
+ * Data: Update Encrypted LS2 blinding and encryption
+
+2019-03-04 zzz
+ * Console: Fix NPEs displaying encrypted LS2
+ * Data: Fix NPE in debug logging
+ * I2CP, NetDB: More fixes for encrypted LS2 (proposal 123)
+ * NetDB: Call fail callback when lookup is negative cached (thx zab)
+
+2019-03-02 zzz
+ * I2CP, NetDB: Fixes for encrypted LS2 (proposal 123)
+
+2019-03-01 zzz
+ * Streaming: Fix sending messages with expired times (ticket #2451)
+
+2019-02-28 zzz
+ * Console:
+   - Fix router logs not shown if first msg is a dup
+   - Change fallback client names to use b32
+
+2019-02-26 zzz
+ * SSU:
+   - Fix scheduling of peer test at startup (ticket #2441)
+   - Fix RTT/RTO calculations (ticket #2443)
+
+2019-02-25 zzz
+ * NetDB: Fix dup publish of RI at startup
+ * NTCP: Fix number of SendFinisher threads (ticket #2438)
+
+2019-02-23 zzz
+ * Console: Flip order of router logs
+ * NetDB:
+   - Use published date, not earliest lease expiration, for LS2 comparisons
+   - Fix earliest LS expiration adjustment when publishing for LS2
+   - Increase flood candidates for LS2
+   - Don't start new store after verify fail if we've already done so
+   - Version checks for encrypted LS2
+ * NTCP: Loop in pumper if more to write (ticket #2440)
+
+2019-02-21 zzz
+ * Crypto: Keygen for RedDSA, allow RedDSA for unblinded keys (Enc LS2)
+ * Data: Always set unpublished flag for inner LS (Enc LS2)
+ * I2CP: Force i2cp.leaseSetType option for offline keys
+
+2019-02-20 zzz
+ * Crypto: ChaCha20 and RedDSA for Encrypted LS2 (proposal #123)
+ * Data: Encrypt/decrypt/sign/verify for Encrypted LS2 (proposal #123)
+
+2019-02-19 zzz
+ * Crypto: Implement blinding, add sig type 11 (proposal 123)
+
+2019-02-18 zzz
+ * Console: Drop midnight and classic themes (ticket #2272)
+ * Tomcat 8.5.38
+ * Transport:
+   - Fixes for NTCP when SSU disabled (ticket #1417)
+   - Delay port forwarding until after UPnP rescan complete
+
+2019-02-08 zzz
+ * Console: Hide disabled transports on /peers
+ * SSU: EstablishmentManager fixes (ticket #2397)
+
+2019-02-07 zzz
+ * NTCP:
+   - Add option to disable NTCP1 (ticket #2328)
+   - Don't bid for outbound-only NTCP2 addresses
+   - Fix NTCP2 cost when transitioning to inbound
+ * SAM: Support offline keys
+ * Streaming: Fix exception after sig verify fail
+
+2019-02-06 zzz
+ * Build: Add targets for alternate debian distros (ticket #2410)
+ * Crypto: Shortcut GroupElement representation conversion
+ * I2CP: Prevent use of repliable datagrams with offline keys
+
+2019-02-05 zzz
+ * Transport:
+   - Clean up unreachable() methods (ticket #2382)
+   - Speed up NTCP allowConnection() (ticket #2381)
+   - OutNetMessage cleanup (ticket #2386)
+   - SSU PacketHandler cleanup (ticket #2383)
+
+2019-02-04 zzz
+ * I2CP: Change format and message type of CreateLeaseSet2 message
+
+2019-02-03 zzz
+ * I2CP:
+   - Remove revocation private key from CreateLeaseset2 message
+   - Use correct key to sign SessionConfig with offline keys
+ * i2ptunnel: Fix HTTP websockets by passing through
+   Connection headers containing "upgrade" (ticket #2422)
+ * Streaming:
+   - Support offline signatures (proposal 123)
+   - Don't send FROM in RESET, not required since 0.9.20
+   - Send RESET when SYN signature verification fails
+   - Use cached buffers for signature verification
+   - Always verify packets with signatures, even if not required
+ * Test: Disable NTP in LocalClientManager
+
+2019-02-02 zzz
+ * Debian: Fix build of i2pcontrol
+
+2019-02-01 zzz
+ * Debian: AppArmor fix for Oracle JVM (ticket #2319)
+ * i2ptunnel:
+   - Caching of outproxy selection, avoid last-failed outproxy
+   - More localhost checks
+   - Handle PUT like POST
+
+2019-01-31 zzz
+ * Debian: Fix version detection of Tomcat 9 required
+   for reproducible builds (ticket #2279)
+
+2019-01-30 zzz
+ * Build: Fix javac.classpath in junit.compileTest targets (ticket #2333)
+ * I2CP: Fixes for CreateLeaseset2 message with multiple keys
+
+2019-01-28 zzz
+ * Bundle i2pcontrol
+ * EdDSA: Make more classes serializable (Github PR #68)
+
+2019-01-27 zzz
+ * NDT:
+   - Catch exception on DNS lookup failure (ticket #2399)
+   - Add support for specifying server in CLI (ticket #2413)
+
+2019-01-24 zzz
+ * Debian:
+   - Fix Debian control files (ticket #2401)
+   - Add build option for libtomcat9 (ticket #2364)
+   - Fix PPA builds for precise and trusty (ticket #2408)
+
+* 2019-01-22 0.9.38 released
+
+2019-01-21 zzz
+ * Debian:
+   - Add source param to javadoc target (ticket #2394)
+   - Replace ttf-dejavu with fonts-dejavu (ticket #2395)
+ * Reseed: Update SSL cert
+
+2019-01-18 zzz
+ * Build:
+   - Update translations
+   - Add files for Disco
+ * NTCP: Stop X25519KeyFactory on shutdown (ticket #2388)
+ * Plugins: Fix loading of webapp configuration classes (ticket #2385)
+
+2019-01-15 zzz
+ * Debian: AppArmor updates (ticket #2319)
+ * SusiMail:
+   - Fix sending mail with attachments (ticket #2373)
+   - Fix deleting attachments from drafts
+   - Fix dup attachments after clicking add attachment without browsing first
+   - Fix update of draft folder after saving as draft
+   - Change text of add attachment button for clarity
+
+2019-01-13 zzz
+ * I2CP: Set LS2 unpublished bit, show in debug output
+
+2019-01-12 zzz
+ * NetDB: Use isSlow() in floodfill criteria
+ * SSU: More consolidation of clock().now() calls
+
+2019-01-10 zzz
+ * I2CP:
+   - Router-side handling of meta LS2
+   - Remove client-side-only options from those sent to router
+   - Router-side stub for encrypted LS2
+
+2019-01-09 zzz
+ * Console: Fix broken image link on /configui
+ * I2CP: Stub out client-side creation of meta and enc. LS2
+ * Wrapper: Increase default heap to 256 MB
+
+2019-01-05 zzz
+ * Crypto: Stub out EdDSA blinding (proposal 123)
+
+2019-01-04 zzz
+ * Build: Check cert validity
+ * Data: Add type byte to MetaLease (proposal 123)
+ * NetDb: Prevent ISJ deadlock (ticket #2366)
+ * Router: Reseed updates
+
+2019-01-02 zzz
+ * Console: Wizard styling (ticket #1473)
+ * Data: Encrypted LS2 progress (proposal 123)
+
+2019-01-01 zzz
+ * Console:
+   - New light background (ticket #738)
+   - Add warning for OpenJDK Zero VM
+ * Data:
+   - Add support for LS2 multiple encryption keys (proposal 123)
+   - Fix Meta LS2 bugs (proposal 123)
+ * Debian: Remove obsolete systray.config
+ * NBI: Add lookup tables for ARMv8
+
+2018-12-24 zzz
+ * Console: Update ARM warning (ticket #2368)
+
+2018-12-23 zzz
+ * Console: Sybil tool background analysis setup form
+
+2018-12-21 zzz
+ * Transports: Improve banning of routers from wrong network
+
+2018-12-19 zzz
+ * NTCP: Efficiency improvements (ticket #2355)
+
+2018-12-17 zzz
+ * Console: Sybil tool background analysis
+ * Data: Set encrypted LS2 hash (proposal 123)
+ * GeoIP: Fix NPE (thx parg)
+ * NTCP: Use new HKDF class
+
+2018-12-15 zzz
+ * Console: Sybil tool refactoring
+
+2018-12-13 zzz
+ * Crypto: Add HKDF class for LS2 and NTCP2 (proposal 123)
+
+2018-12-12 zzz
+ * DTG: Use UrlLauncher to launch browser
+ * Installer: Drop unused systray.config
+ * UrlLauncher: Improvements and cleanups
+ * Util: Add another ShellCommand String[] method
+
+2018-12-11 zzz
+ * Crypto: HMAC-SHA256 cleanup
+ * Debian: Add conffiles list
+ * Utils: Enable TLSv1.3 for SSL sockets
+
+2018-12-08 zzz
+ * Console: Hide I2CP config if disabled
+ * NetDb: Allow longer expiration for Meta LS2
+ * Transport:
+   - Don't repeatedly publish RI if IPv6-only but
+     not configured IPv6-only
+   - Don't set status to disconnected if IPv6-only but
+     not configured IPv6-only
+
+2018-12-05 zzz
+ * I2CP:
+   - Propagate error from disconnect message to session listener
+   - Set offline keys in generated LS2
+   - Set and validate offline sig in SessionConfig
+
+2018-12-04 zzz
+ * Data: Add preliminary PrivateKeyFile support for LS2 offline keys (proposal #123)
+ * I2CP: Add preliminary support for LS2 offline keys (proposal #123)
+
+2018-12-03 zzz
+ * I2CP: Consolidate all the port 7654 definitions
+ * NetDb: Don't send our RI in response to DSM when shutting down
+ * Wizard: Update text
+
+2018-12-02 zzz
+ * Router: Allow LS2 DSM down a tunnel
+ * Transport: Add methods to force-disconnect a peer
+
+2018-12-01 zzz
+ * I2CP: Add preliminary support for LS2 (proposal #123)
+ * Router: More support for LS2 types (proposal #123)
+
+2018-11-30 zzz
+ * Crypto: Move X25519 primitives from router to core (proposal #144)
+ * Data: Update LS2 sign/verify to match spec changes (proposal #123)
+
+2018-11-25 zzz
+ * Utils: Catch ProviderException in SelfSignedGenerator (ticket #2344)
+
+2018-11-20 zzz
+ * GeoIP: Add support for Maxmind GeoLite2 format (ticket #2268)
+
+2018-11-19 zzz
+ * Debian: Add libjson-simple-java dependency
+ * Util: Change json lib from net.minidev.json to com.json.simple
+
+2018-11-17 zzz
+ * Console: Wizard fixes and improvements
+
+2018-11-15 zzz
+ * Console: Connect NDT to setup wizard, various fixes
+
+2018-11-13 zzz
+ * Console:
+   - New M-Lab NDT subsystem (ticket #2321)
+   - Setup wizard (WIP) (ticket #1473)
+ * Router: LS2 handling for proposal 123
+
+2018-10-13 zzz
+ * Build: Add javac.classpath to junit.compileTest targets (ticket #2333)
+ * Data: Add LS2 classes for proposal 123
+
+2018-10-11 zzz
+ * Console: Remove static Server reference
+
+2018-10-10 zzz
+ * Build: Provide option to prevent Class-Path in manifests (ticket #2317)
+
+2018-10-09 zzz
+ * Console: Sybil tool refactoring
+
+2018-10-08 zzz
+ * Console: Refactor StatSummarizer
+
+2018-10-07 zzz
+ * Build: Fix config with-libtomcat8-java but not
+   with-libjetty9-java (ticket #1934)
+ * Debian: Don't override dh_builddeb (ticket #2329)
+
+2018-10-06 zzz
+ * Console:
+   - Fix P/X caps on /tunnels
+   - Netdb search fixes (ticket #2326)
+   - Sort addresses in RIs
+   - Split /peers page into tabs (ticket #1934)
+
+* 2018-10-04 0.9.37 released
+
+2018-10-01 zzz
+ * Pull translations from tx
+
+2018-09-26 zzz
+ * Crypto: Avoid privkey conversion when generating CRL,
+   failing on Android for unknown reasons (ticket #2296)
+ * IRC: Make inbound whitelist static
+ * Router: Don't add 'O' cap for P/X anymore
+
+2018-09-24 zzz
+ * Build: Compile jsps in-order for reproducibility (ticket #2279)
+
+2018-09-23 zzz
+ * Plugins: Blacklist neodatis and seedless for Java 9+ (ticket #2295)
+
+2018-09-22 zzz
+ * NTCP:
+   - Fix handling of multiple connections
+   - Change termination code for expired RI
+
+2018-09-16 zzz
+ * Build: Fix hang with Tomcat 8.5.33+ (ticket #2307)
+ * Tomcat 8.5.34
+
+2018-08-27 zzz
+ * Debian: Prevent dup version (ticket #2300)
+
+2018-08-26 zzz
+ * NTCP2: Publish outbound address after transition to firewalled
+
+2018-08-24 zzz
+ * i2psnark: Better comment deduping, fixes rating average
+ * NTCP2: Enable by default
+
+* 2018-08-23 0.9.36 released
+
+2018-08-20 zzz
+ * Jetty 9.2.25.v20180606
+
+2018-08-19 zzz
+ * NTCP2: Catch bad IV exception
+ * Update translations
+
+2018-08-16 zzz
+ * i2ptunnel: Change read timeout defaults now that streaming timeout works
+
+2018-08-13 zzz
+ * Console: Format part. tunnel rate
+
+2018-08-04 zzz
+ * Data: Check sooner for unknown sig type
+ * I2NP: Remove unused Stream methods
+
+2018-08-03 zzz
+ * NTCP2: Fix termination handling and padding calculation
+
+2018-08-02 zzz
+ * i2psnark: Don't disconnect seeds if comments enabled (ticket #2288)
+ * NTCP2: Send termination on idle timeout
+ * Streaming: More efficient copying in MessageInputStream
+
+2018-07-28 zzz
+ * Console: Catch ISE in get/setAttribute() (ticket #1529)
+ * Streaming: Throw exception on read timeout (ticket #2292)
+
+2018-07-27 zzz
+ * Console: Split netdb output into pages
+ * Router: Implement router.rejectStartupTime config (ticket #2285)
+ * Transport: Defer NTCP 1/2 classification until receiving 64 bytes
+
+2018-07-21 zzz
+ * Build: Add check for libtaglibs package in debian builds
+ * Console: Add netdb search by transport
+ * i2psnark: Sequential order option for single-file torrents (ticket #2234)
+ * NTCP2:
+   - Fix error sending large message (ticket #2286)
+   - Fix NPE after handshake failure (ticket #2286)
+   - Reduce log levels
+ * Tests: Backport EdDSA junit changes; fixes NPE in 2 tests
+
+2018-07-16 zzz
+ * Console: Fix HTML error on /configservice w/o wrapper
+
+2018-07-15 zzz
+ * I2CP: Add option for forcing gzip on/off per-message
+ * NTCP: Increase failsafe sleep threshold (ticket #2251)
+ * Router: Add CLI tool to generate family keys
+
+2018-07-14 zzz
+ * i2psnark: Recreate deleted files on recheck/reopen (ticket #2125)
+
+2018-07-13 zzz
+ * i2psnark: Add sequential order option (ticket #2234)
+
+2018-07-10 zzz
+ * Installer (ticket #1864):
+   - Fix wrapper selection on Windows 10
+   - Add support for IzPack 5
+ * SSU: Sync/notify improvements (ticket #2260)
+ * Util: Convert more caches to TryCache (ticket #2263)
+
+2018-07-08 zzz
+ * i2psnark: Add comment icon (ticket #2278)
+ * NTCP2: Avoid possible NPEs (ticket #2286)
+ * Transport: More efficient caching (ticket #2263)
+
+2018-07-06 zzz
+ * NTCP: Read all available data when able (ticket #2243)
+ * SSU: Change remaining acks from List to Set (ticket #2258)
+
+2018-07-05 zzz
+ * i2psnark:
+   - Fix IOOBE when stopping torrent that is allocating (ticket #2273)
+   - Fix comments wrapping (ticket #2284)
+ * NTCP2: Increase max message size
+
+2018-07-04 zzz
+ * NTCP: Don't advertise interface address when configured for force-firewalled
+
+2018-07-01 zzz
+ * Build: Move Jetty/Tomcat version properties to top-level build.xml
+ * Crypto: Backport EdDSA versions 0.2/0.3 from github
+ * NTCP2: Adjust padding defaults and size calculation
+
+2018-06-30 zzz
+  * Console: Fix reading flags when symlinked (ticket #2270)
+  * Router: Reselect jbigi lib when processor changes (ticket #2277)
+
+2018-06-28 zzz
+  * Debian: Initial work on reproducible builds (ticket #2279)
+
+2018-06-27 zzz
+  * Debian: Add dependency for famfamfam-flag-png (ticket #2270)
+
+2018-06-26 zzz
+  * Console: Move modified flags to new dir (ticket #2270)
+  * Console servlets: Move to new package (ticket #2265)
+  * NTCP pumper: Reduce false positives in failsafe code (ticket #2237)
+  * NTCP2: Initial checkins (proposal #111)
+  * Streaming: Enforce valid port in setters
+
+* 2018-06-26 0.9.35 released
+
+2018-06-23 zzz
+ * Pull translation updates from Transifex
+ * New Azerbaijani translations
+ * GeoIPv6 update from MaxMind 2018-06-04
+
+2018-06-21 zzz
+ * Console: Add Azerbaijani
+ * SusiMail: Fix NPE on logout (ticket #2266)
+
+2018-06-19 zzz
+ * Console:
+   - Restore line breaks in copy/pasted logs (ticket #2078)
+   - Don't show individual tx/rx graphs if showing combined graph (ticket #2106)
+ * SSU: Set volatile on field (ticket #2260)
+
+2018-06-17 zzz
+ * NTCP: Log and fail messages on outbound queue overflow
+
+2018-06-16 zzz
+ * GeoIP: Don't log error when reading to the end
+   of the geoipv6.dat file
+
+2018-06-15 zzz
+ * i2ptunnel: Add new irc server
+ * SusiMail: CSS fixes (ticket #2242)
+
+2018-06-13 zzz
+ * Console: po-update
+ * NTCP: Fix clearing of write interest ops on
+   inbound establishment (ticket #2237)
+
+2018-06-09 zzz
+ * eepsite: Fix up help page in prep for translation (ticket #2214)
+ * i2psnark: Fix torrent ignoring priority settings when
+   autostart is enabled (ticket #2229)
+
+2018-06-02 zzz
+ * Console: Sort tunnels within pools by expiration (ticket #2232)
+ * NTCP:
+   - Refactor EstablishState in prep for NTCP2
+   - Initial NTCP2 RI and payload code, disabled for now
+   - Fix state lock, should not have been static
+
+2018-06-01 zzz
+ * SusiDNS: Fix deleting notes (ticket #1433)
+
+2018-05-31 zzz
+ * Console:
+   - Fix CSS preventing ordered lists (ticket #2075)
+   - Change Java 10 warning to Java 11,
+ * SusiDNS: Add notes form (ticket #1433)
+
+2018-05-30 zzz
+ * Debian build fixes, remove things from source package
+ * NTCP: Cleanup, prep for NTCP2, increase max RI size
+ * SusiMail:
+   - Button and CSS fixes
+   - Don't require confirmation to delete from Trash,
+   - Clear reallydelete flag when clicking cancel or change folder
+   - Fix dup ConnectWaiter run, lack of failure message
+   - Fix persistent loading/fetching/refresh messages
+
+2018-05-28 zzz
+ * Console: Tagged string fixes (ticket #2017)
+ * SusiMail: (ticket #2087)
+   - Send deletions after connect so emails don't come back after a move
+   - Fix fetches in check mail
+   - CSS fixes
+
+2018-05-26 zzz
+ * /confignet: Reorganize (ticket #2217)
+ * /configsidebar: Tag sections for translation; sort unselected sections by translated name
+ * i2psnark:
+   - Hide "0 Bps" if no peers (ticket #2152)
+   - Hide peers button if no peers (ticket #2152)
+   - Hide column 1 icon for peers (ticket #1996)
+ * i2ptunnel: Retry accept after server socket closed (ticket #2003)
+ * Jetty: Skip files with [] in default servlet listing
+ * ministreaming: Add classpath to jar (ticket #2228)
+ * Router: Fix wrapper.config path in OOM message when installed as
+   Debian package, but not running as a service (ticket #2223)
+ * Summary Bar: Change header from "I2P Updates" to "Update Status" (ticket #2137)
+ * Utils: Disable DNSoverHTTPS by default (ticket #2201)
+
+2018-05-25 zzz
+ * Console: Fix changes to wrong tunnel on /configtunnels (ticket #2227)
+ * i2ptunnel: Fix dup tunnels clicking generate on new tunnel (ticket #2225)
+
+2018-05-06 meeh
+ * launchers:
+   - rewritten some logic
+   - made CompleteDeployment which extracts i2pbase.zip
+   - made a SBT task that creates i2pbase.zip
+   - after the hassle I had even getting an JRE7, short: OSX assumes JRE8+
+   - started on a class SystemTrayManager which also holds router state info for menu item filter
+   - "ant osxLauncher" produces now a valid app bundle under launchers/output
+ * Updated ant and made osxLauncher work again (first time triggers SBT dl if not already installed.)
+ * monotone ignore file update
+
+2018-05-05 zzz
+ * i2ptunnel:
+   - Link to SSL wizard (ticket #2159)
+   - Enable SSL to i2p hosts by default
+ * Streaming: Don't send HTTP response on an HTTPS connection
+
+2018-05-01 meeh
+ * launchers:
+   - Added deployment profile for Mac OS X launcher.
+   - Sourced out common code to a common library SBT project.
+   - Decided ~/Library/I2P should be base path on Mac OS X when using regular bundle (Non-BB).
+
+2018-04-29 zzz
+ * Console: Fix NPE on /configsidebar (ticket #2220)
+
+2018-04-28 zzz
+ * i2ptunnel:
+   - Fix startup deadlock in TCG
+   - Initial work on SSL wizard
+
+2018-04-27 zzz
+ * Tunnels: Fix and consolidate allow-zero-hop logic,
+   prevent zero-hop client tunnels when no active peers
+
+2018-04-24 meeh
+ * Mac OS X launcher is still WIP, but:
+   - Building the I2P.app bundle is mostly done
+     - It copies certificates, locale and manuals
+     - It copies jar and war files to the bundle
+ * Added new entries to mtn-ignore so we avoid any PEBCAK with commiting build directories
+ * Added an SBT AutoPlugin named IconHelper to generate valid ICNS images for Mac OS X
+
+2018-04-23 zzz
+ * Clock: Fix early NPE via DoH
+ * EepGet: Handle HTTP response line with no status text
+
+2018-04-23 meeh
+ * Added launchers for Browser Bundle and Mac OS X
+
+2018-04-22 zzz
+ * SusiMail: Include attachments when forwarding (ticket #2087)
+
+2018-04-21 zzz
+ * SusiMail: Remove Bcc-to-self feature, replace with
+   copy-to-sent config (ticket #2087)
+
+2018-04-19 zzz
+ * SusiMail:
+   - Fix reply/forward filling in compose form
+   - Better formatting of addresses in forwarded mail
+
+2018-04-18 zzz
+ * SusiMail: Fix unhandled decoding exception
+
+2018-04-17 zzz
+ * Console: Fix sidebar status when updating plugin (ticket #2137)
+ * Reseed, NTP: Use DNSoverHTTPS (ticket #2201)
+ * SusiMail: Fix error message on login page
+
+2018-04-16 zzz
+ * Console: Add links to bandwidth graphs on /tunnels
+ * SusiMail: Move logging to router logs (ticket #2191)
+
+2018-04-14 zzz
+ * Console: Add built-by to /logs (ticket #2204)
+ * CPUID: Fix TBM detection (ticket #2211)
+ * Debian updates (ticket #2027, PR #15)
+ * i2ptunnel: Build restructuring
+ * Jetty: Fix quote in header line tripping XSS filter (ticket #2215)
+ * SusiMail: Add folders, drafts, background sending (ticket #2087)
+
+2018-04-11 zzz
+ * Debian updates for 0.9.34
+ * Jetty 9.2.24-v201801015
+ * Tomcat 8.5.30
+
+* 2018-04-10 0.9.34 released
+
+2018-04-10 zzz
+ * Console: Change Java 9 log warning to Java 10
+ * i2psnark: Fix logic error in warning
+ * Tunnels: Fix fallback stat name
+
+2018-04-05 zzz
+ * EepGet: Increase max header length
+ * SSLEepGet: Set default CLI proxy type back to none
+ * GeoIP update
+
+2018-04-04 zzz
+ * Reseed: Move ReseedBundler from console to router (ticket #2203)
+
+2018-04-03 zzz
+ * Stats: Enable per-tunnel bw stats by default (tickets #2106, #2145)
+
+2018-04-02 zzz
+ * KeyStore: Fix ConncurrentModificationException (ticket #2196)
+
+2018-03-24 zzz
+ * i2psnark: Change default sort order for some columns (ticket #2152)
+ * i2ptunnel: Fix display of 'tunnels not initialized' message
+
+2018-03-19 zzz
+ * i2ptunnel: Rewrite or pass through Accept: header
+
+2018-03-15 zzz
+ * i2psnark: Start even if data directory not found (ticket #2166)
+
+2018-03-14 zzz
+ * Console:
+   - Hide links to webapps and eepsite if not running (ticket #2161)
+   - Hide link to /configplugins if disabled
+   - Add error handler to webapps (ticket #2155)
+ * i2ptunnel: Hide links to webapps that are not runnning (ticket #2161)
+ * SusiDNS: Translate svg image text (ticket #1749)
+ * SusiMail: Shorten URLs
+
+2018-03-12 zzz
+ * SusiMail: Fix up compose.js (ticket #2176)
+
 2018-03-11 zzz
+ * Crypto: Add utils for renewing a cert in a keystore
  * Router: More peer selection fixes for hidden mode
 
 2018-03-10 zzz
@@ -1901,7 +2611,7 @@ Prop from i2p.i2p.zzz.gmp6-prop:
 2016-02-22 zzz
  * Console: Improve news CSS (ticket #1710)
  * Crypto: Blacklist certificates by SHA1 hash, not by serial/CN/OU
- * I2CP: Improve client error message when internal router connection fails 
+ * I2CP: Improve client error message when internal router connection fails
  * Graphs: Increase font size
  * Transports: Increase default max inbound bandwidth,
    increase minimum in/out bandwidths
@@ -2899,7 +3609,7 @@ Prop from i2p.i2p.zzz.test2:
    - Decrease overload threshold
 
 2015-03-13 dg
- * Router: create router.integratedPeers (floodfills) stat, and 
+ * Router: create router.integratedPeers (floodfills) stat, and
    allow graphing of it.
 
 2015-03-08 zzz
@@ -2914,7 +3624,7 @@ Prop from i2p.i2p.zzz.test2:
    database from 2015-02-04.
 
 2015-02-15 dg
- * FloodfillMonitorJob: 
+ * FloodfillMonitorJob:
    - Use lifetime average value for job lag
    - Change the job lag limit to less than 25ms
    - Consider and set the limit of backlogged tunnels to less than 5
@@ -4222,7 +4932,7 @@ Prop from i2p.i2p.zzz.outproxy:
  * Update: All updates via torrent
 
 2014-01-25 zab
- * Move OutNetMessage buffer preparation to the Writer threads 
+ * Move OutNetMessage buffer preparation to the Writer threads
    (Ticket #1183)
  * Up version to -1
 
@@ -5650,7 +6360,7 @@ i2psnark: Fix ConnectionAcceptor not restarting after tunnel
 2012-10-24 zzz
  * I2PSnark:
    - Fix several partial piece (temp file) leaks
-   - Don't lose all DHT peers if we stop quickly	
+   - Don't lose all DHT peers if we stop quickly
    - Explore a kbucket if it's less than 3/4 full
 
 2012-10-24 str4d
@@ -6095,7 +6805,7 @@ i2psnark: Fix ConnectionAcceptor not restarting after tunnel
  * SSU MTU (ticket #682):
    - Use local MTU detection
    - i2np.udp.mtu now sets max MTU, not initial MTU
-   - Put local MTU in netDb 
+   - Put local MTU in netDb
    - Fix receive MTU calculations
    - Track remote MTU based on actual received packet size
    - Display local MTU on peers page

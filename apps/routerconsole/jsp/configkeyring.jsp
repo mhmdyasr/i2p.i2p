@@ -17,7 +17,7 @@
  <jsp:useBean class="net.i2p.router.web.helpers.ConfigKeyringHandler" id="formhandler" scope="request" />
 <%@include file="formhandler.jsi" %>
  <jsp:useBean class="net.i2p.router.web.helpers.ConfigKeyringHelper" id="keyringhelper" scope="request" />
- <jsp:setProperty name="keyringhelper" property="contextId" value="<%=(String)session.getAttribute(\"i2p.contextId\")%>" />
+ <jsp:setProperty name="keyringhelper" property="contextId" value="<%=i2pcontextId%>" />
 <p id="keyringhelp" class="infohelp">
  <%=intl._t("The router keyring is used to decrypt encrypted leaseSets.")%>
  <%=intl._t("The keyring may contain keys for local or remote encrypted destinations.")%></p>
@@ -29,7 +29,12 @@
         <tr>
           <td class="infohelp" colspan="2">
  <%=intl._t("Enter keys for encrypted remote destinations here.")%>
+<%
+    net.i2p.util.PortMapper pm = net.i2p.I2PAppContext.getGlobalContext().portMapper();
+    if (pm.isRegistered(net.i2p.util.PortMapper.SVC_I2PTUNNEL)) {
+%>
  <%=intl._t("Keys for local destinations must be entered on the")%> <a href="i2ptunnel/"><%=intl._t("I2PTunnel page")%></a>.
+<%  }  %>
           </td>
         </tr><tr>
           <td align="right"><b><%=intl._t("Full destination, name, base 32, or hash")%>:</b></td>

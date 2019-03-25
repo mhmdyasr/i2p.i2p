@@ -28,31 +28,32 @@
 <tr><td><b>I2P version:</b></td><td><%=net.i2p.router.RouterVersion.FULL_VERSION%></td></tr>
 <tr><td><b>Java version:</b></td><td><%=System.getProperty("java.vendor")%> <%=System.getProperty("java.version")%> (<%=System.getProperty("java.runtime.name")%> <%=System.getProperty("java.runtime.version")%>)</td></tr>
  <jsp:useBean class="net.i2p.router.web.helpers.LogsHelper" id="logsHelper" scope="request" />
- <jsp:setProperty name="logsHelper" property="contextId" value="<%=(String)session.getAttribute(\"i2p.contextId\")%>" />
+ <jsp:setProperty name="logsHelper" property="contextId" value="<%=i2pcontextId%>" />
 <jsp:getProperty name="logsHelper" property="unavailableCrypto" />
 <tr><td><b>Wrapper version:</b></td><td><%=System.getProperty("wrapper.version", "none")%></td></tr>
 <tr><td><b>Server version:</b></td><td><jsp:getProperty name="logsHelper" property="jettyVersion" /></td></tr>
 <tr><td><b>Servlet version:</b></td><td><%=getServletInfo()%></td></tr>
 <tr><td><b>JSTL version:</b></td><td><jsp:getProperty name="logsHelper" property="jstlVersion" /></td></tr>
 <tr><td><b>Platform:</b></td><td><%=System.getProperty("os.name")%> <%=System.getProperty("os.arch")%> <%=System.getProperty("os.version")%></td></tr>
+<tr><td><b>Processor:</b></td><td>
 <%
    boolean isX86 = net.i2p.util.SystemVersion.isX86();
-   if (isX86) {
-%><tr><td><b>Jcpuid version:</b></td><td><%=freenet.support.CPUInformation.CPUID.getJcpuidVersion()%></td></tr>
-<%
-   }
-%><tr><td><b>Processor:</b></td><td>
-<%
    if (isX86) {
 %> <%=net.i2p.util.NativeBigInteger.cpuModel()%>
 <%
    }
 %> (<%=net.i2p.util.NativeBigInteger.cpuType()%>)</td></tr>
-<tr><td><b>Jbigi:</b></td><td><%=net.i2p.util.NativeBigInteger.loadStatus()%></td></tr>
-<tr><td><b>Jbigi version:</b></td><td><%=net.i2p.util.NativeBigInteger.getJbigiVersion()%></td></tr>
+<tr><td><b>JBigI status:</b></td><td><%=net.i2p.util.NativeBigInteger.loadStatus()%></td></tr>
 <tr><td><b>GMP version:</b></td><td><%=net.i2p.util.NativeBigInteger.getLibGMPVersion()%></td></tr>
-<tr><td><b>Encoding:</b></td><td><%=System.getProperty("file.encoding")%></td></tr>
-<tr><td><b>Charset:</b></td><td><%=java.nio.charset.Charset.defaultCharset().name()%></td></tr></tbody></table>
+<tr><td><b>JBigI version:</b></td><td><%=net.i2p.util.NativeBigInteger.getJbigiVersion()%></td></tr>
+<%
+   if (isX86) {
+%><tr><td><b>JCpuId version:</b></td><td><%=freenet.support.CPUInformation.CPUID.getJcpuidVersion()%></td></tr>
+<%
+   }
+%><tr><td><b>Encoding:</b></td><td><%=System.getProperty("file.encoding")%></td></tr>
+<tr><td><b>Charset:</b></td><td><%=java.nio.charset.Charset.defaultCharset().name()%></td></tr>
+<tr><td><b>Built By:</b></td><td><jsp:getProperty name="logsHelper" property="builtBy" /></tbody></table>
 
 <h3 class="tabletitle"><%=intl._t("Critical Logs")%></h3>
 <table id="criticallogs" class="logtable"><tbody>

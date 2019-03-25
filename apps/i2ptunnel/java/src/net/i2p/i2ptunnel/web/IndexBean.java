@@ -31,6 +31,7 @@ import net.i2p.i2ptunnel.I2PTunnelServer;
 import net.i2p.i2ptunnel.TunnelController;
 import net.i2p.i2ptunnel.TunnelControllerGroup;
 import net.i2p.i2ptunnel.ui.GeneralHelper;
+import net.i2p.i2ptunnel.ui.Messages;
 import net.i2p.i2ptunnel.ui.TunnelConfig;
 import net.i2p.util.Addresses;
 import net.i2p.util.Log;
@@ -76,8 +77,11 @@ public class IndexBean {
     private static final List<String> _nonces = new ArrayList<String>(MAX_NONCES + 1);
     private static final UIMessages _messages = new UIMessages(100);
 
-    public static final String PROP_THEME_NAME = "routerconsole.theme";
-    public static final String DEFAULT_THEME = "light";
+    private static final String PROP_THEME_NAME = "routerconsole.theme";
+    private static final String DEFAULT_THEME = "light";
+    /** From CSSHelper */
+    private static final String PROP_DISABLE_OLD = "routerconsole.disableOldThemes";
+    private static final boolean DEFAULT_DISABLE_OLD = true;
     public static final String PROP_CSS_DISABLED = "routerconsole.css.disabled";
     public static final String PROP_JS_DISABLED = "routerconsole.javascript.disabled";
     private static final String PROP_PW_ENABLE = "routerconsole.auth.enable";
@@ -133,8 +137,11 @@ public class IndexBean {
         }
     }
 
-    /** do we know this nonce? @since 0.8.1 */
-    private static boolean haveNonce(String nonce) {
+    /**
+      * do we know this nonce?
+      * @since 0.8.1 public since 0.9.35
+      */
+    public static boolean haveNonce(String nonce) {
         synchronized (_nonces) {
             return _nonces.contains(nonce);
         }
@@ -263,6 +270,11 @@ public class IndexBean {
         return _t("Stopping tunnel") + ' ' + getTunnelName(_tunnel) + "...";
     }
     
+    /**
+     * Only call this ONCE! Or you will get duplicate tunnels on save.
+     *
+     * @return not HTML escaped, or "" if empty
+     */
     private String saveChanges() {
         // FIXME name will be HTML escaped twice
         return getMessages(_helper.saveTunnel(_tunnel, _config));
@@ -296,7 +308,7 @@ public class IndexBean {
             try {
                 String result = processAction();
                 if (result.length() > 0)
-                    buf.append(processAction()).append('\n');
+                    buf.append(result).append('\n');
             } catch (RuntimeException e) {
                 _log.log(Log.CRIT, "Error processing " + _action, e);
                 buf.append("Error: ").append(e.toString()).append('\n');
@@ -327,6 +339,14 @@ public class IndexBean {
     
     public String getTheme() {
         String theme = _context.getProperty(PROP_THEME_NAME, DEFAULT_THEME);
+        // remap deprecated themes
+        if (theme.equals("midnight")) {
+            if (_context.getProperty(PROP_DISABLE_OLD, DEFAULT_DISABLE_OLD))
+                theme = "dark";
+        } else if (theme.equals("classic")) {
+            if (_context.getProperty(PROP_DISABLE_OLD, DEFAULT_DISABLE_OLD))
+                theme = "light";
+        }
         return "/themes/console/" + theme + "/";
     }
 
@@ -1204,12 +1224,8 @@ public class IndexBean {
     /** New key */
     private String generateNewEncryptionKey() {
         TunnelController tun = getController(_tunnel);
-        Properties config = getConfig();
         if (tun == null) {
             // creating new
-            tun = new TunnelController(config, "", true);
-            _group.addController(tun);
-            saveChanges();
         } else if (tun.getIsRunning() || tun.getIsStarting()) {
             return "Tunnel must be stopped before modifying leaseset encryption key";
         }

@@ -69,7 +69,7 @@ build-indep:
 		cp $(ROUTERVERSION) $(CURDIR)/debian/routerversion.java.bak; \
 	fi
 ifeq "$(findstring deb,$(shell grep 'deb' $(ROUTERVERSION)))" ""
-	sed -e "s/\(.*EXTRA\ =\ \)[^ ]*\"\(.*\)\"/\1\"\2-$$EXTRAPREFIX$$DEBIANVERSION\"/" < $(ROUTERVERSION) > $(ROUTERVERSION).tmp
+	sed -e "s/\(.*EXTRA\ =\ \)[^ ]*\"\(.*\)\"/\1\"-$$EXTRAPREFIX$$DEBIANVERSION\"/" < $(ROUTERVERSION) > $(ROUTERVERSION).tmp
 	mv -f $(ROUTERVERSION).tmp $(ROUTERVERSION)
 else
 	@echo "Already found deb in version, not doing anything"
@@ -142,6 +142,14 @@ endif
 	@/bin/echo -e "with-libgetopt-java=true" >> $(CURDIR)/override.properties
 	@mkdir -p $(CURDIR)/core/java/build
 	ln -sf /usr/share/java/gnu-getopt.jar $(CURDIR)/core/java/build/gnu-getopt.jar
+
+	@# debian: jessie+; ubuntu: trusty+
+	@/bin/echo -e "with-libjson-simple-java=true" >> $(CURDIR)/override.properties
+	@mkdir -p $(CURDIR)/core/java/build
+	ln -sf /usr/share/java/json-simple.jar $(CURDIR)/core/java/build/json-simple.jar
+
+	@# debian: everywhere; ubuntu: trusty+
+	@/bin/echo -e "with-famfamfam-flag-png=true" >> $(CURDIR)/override.properties
 
 	@# 2 MB of dependencies vs. 20 KB of copied source
 	@# Requires 4.4 or higher.

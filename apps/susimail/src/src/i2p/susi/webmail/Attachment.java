@@ -73,6 +73,14 @@ public class Attachment {
 	}
 
 	/**
+	 * @return absolute path to the data file
+	 * @since 0.9.35
+	 */
+	public String getPath() {
+		return data.getAbsolutePath();
+	}
+
+	/**
 	 * The unencoded size
 	 * @since 0.9.33
 	 */
@@ -86,5 +94,24 @@ public class Attachment {
 	 */
 	public void deleteData() {
 		data.delete();
+	}
+
+	/**
+	 * @since 0.9.38
+	 */
+	@Override
+	public int hashCode() {
+		return fileName.hashCode() ^ data.hashCode();
+	}
+
+	/**
+	 * @since 0.9.38
+	 */
+	@Override
+	public boolean equals (Object o) {
+		if (o == null || !(o instanceof Attachment))
+			return false;
+		Attachment a = (Attachment) o;		
+		return fileName.equals(a.fileName) && data.equals(a.data);
 	}
 }

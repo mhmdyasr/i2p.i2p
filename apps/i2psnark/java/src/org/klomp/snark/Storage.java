@@ -25,11 +25,14 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.io.Serializable;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
 import java.security.MessageDigest;
+import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +75,7 @@ public class Storage implements Closeable
   private final boolean _preserveFileNames;
   private boolean changed;
   private volatile boolean _isChecking;
+  private boolean _inOrder;
   private final AtomicInteger _allocateCount = new AtomicInteger();
   private final AtomicInteger _checkProgress = new AtomicInteger();
 
@@ -82,6 +86,8 @@ public class Storage implements Closeable
   /** The maximum number of pieces in a torrent. */
   public static final int MAX_PIECES = 32*1024;
   public static final long MAX_TOTAL_SIZE = MAX_PIECE_SIZE * (long) MAX_PIECES;
+  public static final int PRIORITY_SKIP = -9;
+  public static final int PRIORITY_NORMAL = 0;
 
   private static final Map<String, String> _filterNameCache = new ConcurrentHashMap<String, String>();
 
@@ -145,7 +151,7 @@ public class Storage implements Closeable
     _torrentFiles = getFiles(baseFile);
     
     long total = 0;
-    ArrayList<Long> lengthsList = new ArrayList<Long>();
+    ArrayList<Long> lengthsList = new ArrayList<Long>(_torrentFiles.size());
     for (TorrentFile tf : _torrentFiles)
       {
         long length = tf.length;
@@ -178,7 +184,7 @@ public class Storage implements Closeable
     bitfield = new BitField(pieces);
     needed = 0;
 
-    List<List<String>> files = new ArrayList<List<String>>();
+    List<List<String>> files = new ArrayList<List<String>>(_torrentFiles.size());
     for (TorrentFile tf : _torrentFiles)
       {
         List<String> file = new ArrayList<String>();
@@ -434,9 +440,9 @@ public class Storage implements Closeable
    */
   public int getPriority(int fileIndex) {
       if (complete() || metainfo.getFiles() == null)
-          return 0;
+          return PRIORITY_NORMAL;
       if (fileIndex < 0 || fileIndex >= _torrentFiles.size())
-          return 0;
+          return PRIORITY_NORMAL;
       return _torrentFiles.get(fileIndex).priority;
   }
 
@@ -482,7 +488,7 @@ public class Storage implements Closeable
   void setFilePriorities(int[] p) {
       if (p == null) {
           for (TorrentFile tf : _torrentFiles) {
-              tf.priority = 0;
+              tf.priority = PRIORITY_NORMAL;
           }
       } else {
           int sz = _torrentFiles.size();
@@ -495,16 +501,70 @@ public class Storage implements Closeable
   }
 
   /**
+   *  @return as last set, default false
+   *  @since 0.9.36
+   */
+  public boolean getInOrder() {
+      return _inOrder;
+  }
+
+  /**
+   *  Call AFTER setFilePriorites() so we know what's skipped
+   *  @param yes enable or not
+   *  @since 0.9.36
+   */
+  public void setInOrder(boolean yes) {
+      if (yes == _inOrder)
+          return;
+      _inOrder = yes;
+      if (complete())
+          return;
+      if (yes) {
+          List<TorrentFile> sorted = _torrentFiles;
+          int sz = sorted.size();
+          if (sz > 1) {
+              sorted = new ArrayList<TorrentFile>(sorted);
+              Collections.sort(sorted, new FileNameComparator());
+          }
+          for (int i = 0; i < sz; i++) {
+              TorrentFile tf = sorted.get(i);
+              // higher number is higher priority
+              if (tf.priority >= PRIORITY_NORMAL)
+                  tf.priority = sz - i;
+          }
+      } else {
+          for (TorrentFile tf : _torrentFiles) {
+              if (tf.priority > PRIORITY_NORMAL)
+                  tf.priority = PRIORITY_NORMAL;
+          }
+      }
+  }
+
+  /**
+   *  Sort with locale comparator.
+   *  (not using TorrentFile.compareTo())
+   *  @since 0.9.36
+   */
+  private static class FileNameComparator implements Comparator<TorrentFile>, Serializable {
+
+     private final Collator c = Collator.getInstance();
+
+     public int compare(TorrentFile l, TorrentFile r) {
+         return c.compare(l.toString(), r.toString());
+     }
+  }
+
+  /**
    *  Call setPriority() for all changed files first,
    *  then call this.
    *  Set the piece priority to the highest priority
    *  of all files spanning the piece.
    *  Caller must pass array to the PeerCoordinator.
-   *  @return null on error, if complete, or if only one file
+   *  @return null on error, if complete, or if only one file and inOrder not set.
    *  @since 0.8.1
    */
   public int[] getPiecePriorities() {
-      if (complete() || metainfo.getFiles() == null)
+      if (complete() || (metainfo.getFiles() == null && !_inOrder))
           return null;
       int[] rv = new int[metainfo.getPieces()];
       int file = 0;
@@ -522,6 +582,25 @@ public class Storage implements Closeable
                   pri = tf.priority;
           }
           rv[i] = pri;
+      }
+      if (_inOrder) {
+          // Do a second pass to set the priority of the pieces within each file
+          // this only works because MAX_PIECES * MAX_FILES_PER_TORRENT < Integer.MAX_VALUE
+          // the base file priority
+          int pri = PRIORITY_SKIP;
+          for (int i = 0; i < rv.length; i++) {
+              int val = rv[i];
+              if (val <= PRIORITY_NORMAL)
+                  continue;
+              if (val != pri) {
+                  pri = val;
+                  // new file
+                  rv[i] *= MAX_PIECES;
+              } else {
+                  // same file, decrement priority from previous piece
+                  rv[i] = rv[i-1] - 1;
+              }
+          }
       }
       return rv;
   }
@@ -544,7 +623,7 @@ public class Storage implements Closeable
       long rv = 0;
       final int end = pri.length - 1;
       for (int i = 0; i <= end; i++) {
-          if (pri[i] <= -9 && !bitfield.get(i)) {
+          if (pri[i] <= PRIORITY_SKIP && !bitfield.get(i)) {
               rv += (i != end) ? piece_size : metainfo.getPieceLength(i);
           }
       }
@@ -709,9 +788,29 @@ public class Storage implements Closeable
   {
       if (_torrentFiles.isEmpty())
           throw new IOException("Storage not checked yet");
-      for (TorrentFile tf : _torrentFiles) {
-          if (!tf.RAFfile.exists())
-              throw new IOException("File does not exist: " + tf);
+      for (int i = 0; i < _torrentFiles.size(); i++) {
+          TorrentFile tf = _torrentFiles.get(i);
+          if (!tf.RAFfile.exists()) {
+              // File should exist when we get here, but could have vanished
+              List<List<String>> files = metainfo.getFiles();
+              if (files != null) {
+                  createFileFromNames(_base, files.get(i), _util.getFilesPublic());
+              } else {
+                  if (!_base.createNewFile())
+                      throw new IOException("File '" + tf.name + "' was deleted, unable to recreate");
+              }
+              synchronized(tf) {
+                  tf.allocateFile();
+                  // close as we go so we don't run out of file descriptors
+                  try {
+                      tf.closeRAF();
+                  } catch (IOException ioe) {}
+              }
+              String msg = "File '" + tf.name + "' was deleted, must be downloaded again";
+              if (listener != null)
+                  listener.addMessage(msg);
+              _log.error(msg);
+          }
       }
   }
 
@@ -944,18 +1043,32 @@ public class Storage implements Closeable
     // Make sure all files are available and of correct length
     // The files should all exist as they have been created with zero length by createFilesFromNames()
     long lengthProgress = 0;
-    for (TorrentFile tf : _torrentFiles)
-      {
+    for (int i = 0; i < _torrentFiles.size(); i++) {
+        TorrentFile tf = _torrentFiles.get(i);
         long length = tf.RAFfile.length();
         lengthProgress += tf.length;
-        if(tf.RAFfile.exists() && length == tf.length)
-          {
+        boolean exists = tf.RAFfile.exists();
+        if (exists && length == tf.length) {
             if (listener != null)
               listener.storageAllocated(this, length);
             _checkProgress.set(0);
             resume = true; // XXX Could dynamicly check
+        } else if (length == 0) {
+          if (!exists) {
+              // File should exist when we get here, but could have vanished
+              // and we're now doing a recheck
+              List<List<String>> files = metainfo.getFiles();
+              if (files != null) {
+                  createFileFromNames(_base, files.get(i), _util.getFilesPublic());
+              } else {
+                  if (!_base.createNewFile())
+                      throw new IOException("File '" + tf.name + "' was deleted, unable to recreate");
+              }
+              String msg = "File '" + tf.name + "' was deleted, must be downloaded again";
+              if (listener != null)
+                  listener.addMessage(msg);
+              _log.error(msg);
           }
-        else if (length == 0) {
           changed = true;
           synchronized(tf) {
               allocateFile(tf);
@@ -1426,6 +1539,8 @@ public class Storage implements Closeable
        *  This creates a (presumably) sparse file so that reads won't fail with IOE.
        *  Sets isSparse[nr] = true. balloonFile(nr) should be called later to
        *  defrag the file.
+       *
+       *  File MUST exist or will throw IOE
        *
        *  This calls openRAF(); caller must synchronize and call closeRAF().
        */

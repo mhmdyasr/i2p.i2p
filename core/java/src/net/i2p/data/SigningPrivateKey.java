@@ -11,6 +11,7 @@ package net.i2p.data;
 
 import java.util.Arrays;
 
+import net.i2p.crypto.Blinding;
 import net.i2p.crypto.KeyGenerator;
 import net.i2p.crypto.SigType;
 
@@ -89,19 +90,45 @@ public class SigningPrivateKey extends SimpleDataStructure {
     }
 
     /**
+     *  Only for SigType EdDSA_SHA512_Ed25519
+     *
+     *  @param alpha the secret data
+     *  @throws UnsupportedOperationException unless supported
+     *  @since 0.9.38
+     */
+    public SigningPrivateKey blind(SigningPrivateKey alpha) {
+        return Blinding.blind(this, alpha);
+    }
+
+    /**
+     *  Constant time
+     *  @return true if all zeros
+     *  @since 0.9.39 moved from PrivateKeyFile
+     */
+    public boolean isOffline() {
+        if (_data == null)
+            return true;
+        byte b = 0;
+        for (int i = 0; i < _data.length; i++) {
+            b |= _data[i];
+        }
+        return b == 0;
+    }
+
+    /**
      *  @since 0.9.8
      */
     @Override
     public String toString() {
         StringBuilder buf = new StringBuilder(64);
-        buf.append('[').append(getClass().getSimpleName()).append(' ').append(_type).append(": ");
+        buf.append("[SigningPrivateKey ").append(_type).append(": ");
         int length = length();
         if (_data == null) {
             buf.append("null");
         } else if (length <= 32) {
             buf.append(toBase64());
         } else {
-            buf.append("size: ").append(Integer.toString(length));
+            buf.append("size: ").append(length);
         }
         buf.append(']');
         return buf.toString();

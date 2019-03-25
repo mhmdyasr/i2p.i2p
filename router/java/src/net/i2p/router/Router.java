@@ -14,8 +14,10 @@ import java.security.GeneralSecurityException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -25,6 +27,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import gnu.getopt.Getopt;
 
+import freenet.support.CPUInformation.CPUID;
+import freenet.support.CPUInformation.UnknownCPUException;
 import net.i2p.client.impl.I2PSessionImpl;
 import net.i2p.crypto.SigUtil;
 import net.i2p.data.Base64;
@@ -43,15 +47,18 @@ import net.i2p.router.crypto.FamilyKeyCrypto;
 import net.i2p.router.message.GarlicMessageHandler;
 import net.i2p.router.networkdb.kademlia.FloodfillNetworkDatabaseFacade;
 import net.i2p.router.startup.CreateRouterInfoJob;
+import net.i2p.router.startup.PortableWorkingDir;
 import net.i2p.router.startup.StartupJob;
 import net.i2p.router.startup.WorkingDir;
 import net.i2p.router.tasks.*;
 import net.i2p.router.transport.FIFOBandwidthLimiter;
+import net.i2p.router.transport.ntcp.NTCPTransport;
 import net.i2p.router.transport.udp.UDPTransport;
 import net.i2p.router.util.EventLog;
 import net.i2p.stat.RateStat;
 import net.i2p.stat.StatManager;
 import net.i2p.util.ByteCache;
+import net.i2p.util.FileUtil;
 import net.i2p.util.FortunaRandomSource;
 import net.i2p.util.I2PAppThread;
 import net.i2p.util.I2PThread;
@@ -127,6 +134,7 @@ public class Router implements RouterClock.ClockShiftListener {
     public static final String PROP_OB_RANDOM_KEY = TunnelPoolSettings.PREFIX_OUTBOUND_EXPLORATORY + TunnelPoolSettings.PROP_RANDOM_KEY;
     private static final String EVENTLOG = "eventlog.txt";
     private static final String PROP_JBIGI = "jbigi.loadedResource";
+    private static final String PROP_JBIGI_PROCESSOR = "jbigi.lastProcessor";
     public static final String UPDATE_FILE = "i2pupdate.zip";
         
     private static final int SHUTDOWN_WAIT_SECS = 60;
@@ -270,7 +278,11 @@ public class Router implements RouterClock.ClockShiftListener {
         // Do we copy all the data files to the new directory? default false
         String migrate = System.getProperty("i2p.dir.migrate");
         boolean migrateFiles = Boolean.parseBoolean(migrate);
-        String userDir = WorkingDir.getWorkingDir(envProps, migrateFiles);
+
+
+        String isPortableStr = System.getProperty("i2p.dir.portableMode");
+        boolean isPortable = Boolean.parseBoolean(isPortableStr);
+        String userDir = (!isPortable) ? WorkingDir.getWorkingDir(envProps, migrateFiles) : PortableWorkingDir.getWorkingDir(envProps);
 
         // Use the router.config file specified in the router.configLocation property
         // (default "router.config"),
@@ -397,7 +409,9 @@ public class Router implements RouterClock.ClockShiftListener {
         // Apps may use this as an easy way to determine if they are in the router JVM
         // But context.isRouterContext() is even easier...
         // Both of these as of 0.7.9
-        System.setProperty("router.version", RouterVersion.VERSION);
+        // As of 0.9.34, this is FULL_VERSION, not VERSION, which was the same as CoreVersion.VERSION
+        // and thus not particularly useful.
+        System.setProperty("router.version", RouterVersion.FULL_VERSION);
 
         // crypto init may block for 10 seconds waiting for entropy
         // we want to do this before context.initAll()
@@ -809,6 +823,16 @@ public class Router implements RouterClock.ClockShiftListener {
     }
 
     /**
+     * @return true if router is RUNNING, i.e NetDB and Expl. tunnels are ready.
+     * @since 0.9.39
+     */
+    public boolean isRunning() {
+        synchronized(_stateLock) {
+            return _state == State.RUNNING;
+        }
+    }
+
+    /**
      *  Only for Restarter, after soft restart is complete.
      *  Not for external use.
      *  @since 0.8.12
@@ -823,11 +847,24 @@ public class Router implements RouterClock.ClockShiftListener {
      *  @since 0.9.18
      */
     public void setNetDbReady() {
+        boolean changed = false;
         synchronized(_stateLock) {
-            if (_state == State.STARTING_3)
+            if (_state == State.STARTING_3) {
                 changeState(State.NETDB_READY);
-            else if (_state == State.EXPL_TUNNELS_READY)
+                changed = true;
+            } else if (_state == State.EXPL_TUNNELS_READY) {
                 changeState(State.RUNNING);
+                changed = true;
+            }
+        }
+        if (changed) {
+            // any previous calls to netdb().publish() did not
+            // actually publish, because netdb init was not complete
+            Republish r = new Republish(_context);
+            // this is called from PersistentDataStore.ReadJob,
+            // so we probably don't need to throw it to the timer queue,
+            // but just to be safe
+            _context.simpleTimer2().addEvent(r, 0);
         }
     }
 
@@ -891,7 +928,7 @@ public class Router implements RouterClock.ClockShiftListener {
      */
     public void rebuildRouterInfo(boolean blockingRebuild) {
         if (_log.shouldLog(Log.INFO))
-            _log.info("Rebuilding new routerInfo");
+            _log.info("Rebuilding new routerInfo, publish inline? " + blockingRebuild, new Exception("I did it"));
         _routerInfoLock.writeLock().lock();
         try {
             locked_rebuildRouterInfo(blockingRebuild);
@@ -1054,8 +1091,8 @@ public class Router implements RouterClock.ClockShiftListener {
         rv.append(bw);
         // 512 and unlimited supported as of 0.9.18;
         // Add 256 as well for compatibility
-        if (bw == CAPABILITY_BW512 || bw == CAPABILITY_BW_UNLIMITED)
-            rv.append(CAPABILITY_BW256);
+        //if (bw == CAPABILITY_BW512 || bw == CAPABILITY_BW_UNLIMITED)
+        //    rv.append(CAPABILITY_BW256);
 
         // if prop set to true, don't tell people we are ff even if we are
         if (_context.netDb().floodfillEnabled() &&
@@ -1165,6 +1202,9 @@ public class Router implements RouterClock.ClockShiftListener {
         synchronized(_configFileLock) {
             removeConfigSetting(UDPTransport.PROP_INTERNAL_PORT);
             removeConfigSetting(UDPTransport.PROP_EXTERNAL_PORT);
+            removeConfigSetting(NTCPTransport.PROP_I2NP_NTCP_PORT);
+            removeConfigSetting(NTCPTransport.PROP_NTCP2_SP);
+            removeConfigSetting(NTCPTransport.PROP_NTCP2_IV);
             removeConfigSetting(PROP_IB_RANDOM_KEY);
             removeConfigSetting(PROP_OB_RANDOM_KEY);
             removeConfigSetting(PROP_REBUILD_KEYS);
@@ -1209,12 +1249,65 @@ public class Router implements RouterClock.ClockShiftListener {
      *  Could block for 10 seconds or forever
      */
     private void warmupCrypto() {
+        String oldLoaded = _context.getProperty(PROP_JBIGI);
+        String oldProcessor = _context.getProperty(PROP_JBIGI_PROCESSOR);
+        String processor = null;
+        if (SystemVersion.isX86()) {
+            // Check to see if processor changed since last time we ran,
+            // or if we detected a different processor model due to CPUID code changes,
+            // or if we changed 32/64 bit.
+            // If so, delete the old jbigi.so file, to protect against a JVM crash.
+            // We do this before calling elGamalEngine(), which calls NBI.
+            // We take care not to access the NBI class yet.
+            try {
+                processor = CPUID.getInfo().getCPUModelString();
+                if (SystemVersion.is64Bit())
+                    processor += "/64";
+                if (oldProcessor != null && !oldProcessor.equals(processor)) {
+                    // delete old so file
+                    boolean isWin = SystemVersion.isWindows();
+                    boolean isMac = SystemVersion.isMac();
+                    String osName = System.getProperty("os.name").toLowerCase(Locale.US);
+                    // only do this on these OSes
+                    boolean goodOS = isWin || isMac ||
+                                     osName.contains("linux") || osName.contains("freebsd");
+                    File jbigiJar = new File(_context.getBaseDir(), "lib/jbigi.jar");
+                    if (goodOS && jbigiJar.exists() && _context.getBaseDir().canWrite()) {
+                        String libPrefix = isWin ? "" : "lib";
+                        String libSuffix = isWin ? ".dll" : isMac ? ".jnilib" : ".so";
+                        File jbigiLib = new File(_context.getBaseDir(), libPrefix + "jbigi" + libSuffix);
+                        if (jbigiLib.canWrite()) {
+                            String path = jbigiLib.getAbsolutePath();
+                            boolean success = FileUtil.copy(path, path + ".bak", true, true);
+                            if (success) {
+                                success = jbigiLib.delete();
+                                if (success) {
+                                    System.out.println("Processor change detected, moved jbigi library to " +
+                                                       path + ".bak");
+                                    System.out.println("Check logs for successful installation of new library");
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (UnknownCPUException e) {}
+        }
         _context.random().nextBoolean();
         // Instantiate to fire up the YK refiller thread
         _context.elGamalEngine();
         String loaded = NativeBigInteger.getLoadedResourceName();
-        if (loaded != null)
-            saveConfig(PROP_JBIGI, loaded);
+        Map<String, String> changes = null;
+        if (loaded != null && !loaded.equals(oldLoaded)) {
+            changes = new HashMap<String, String>(2);
+            changes.put(PROP_JBIGI, loaded);
+        }
+        if (processor != null && !processor.equals(oldProcessor)) {
+            if (changes == null)
+                changes = new HashMap<String, String>(1);
+            changes.put(PROP_JBIGI_PROCESSOR, processor);
+        }
+        if (changes != null)
+            saveConfig(changes, null);
     }
     
     /** shut down after all tunnels are gone */

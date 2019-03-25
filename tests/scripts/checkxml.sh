@@ -63,7 +63,6 @@ HTMLFILES="\
 ./apps/BOB/src/net/i2p/BOB/package.html \
 ./apps/desktopgui/src/net/i2p/desktopgui/package.html \
 ./apps/ministreaming/java/src/net/i2p/client/streaming/package.html \
-./apps/susidns/src/index.html \
 ./apps/susimail/src/index.html \
 ./core/java/src/net/i2p/client/datagram/package.html \
 ./core/java/src/net/i2p/client/naming/package.html \
@@ -76,25 +75,10 @@ HTMLFILES="\
 ./core/java/src/net/i2p/stat/package.html \
 ./core/java/src/net/i2p/time/package.html \
 ./core/java/src/net/i2p/util/package.html \
-./installer/resources/eepsite/docroot/help/index_de.html \
-./installer/resources/eepsite/docroot/help/index_fr.html \
-./installer/resources/eepsite/docroot/help/index.html \
-./installer/resources/eepsite/docroot/help/index_na.html \
-./installer/resources/eepsite/docroot/help/index_nl.html \
-./installer/resources/eepsite/docroot/help/index_ru.html \
-./installer/resources/eepsite/docroot/help/index_sv.html \
+./installer/resources/eepsite/docroot/help/index*.html \
 ./installer/resources/eepsite/docroot/help/pagetemplate.html \
 ./installer/resources/eepsite/docroot/index.html \
-./installer/resources/readme/readme_ar.html \
-./installer/resources/readme/readme_de.html \
-./installer/resources/readme/readme_es.html \
-./installer/resources/readme/readme_fr.html \
-./installer/resources/readme/readme.html \
-./installer/resources/readme/readme_nl.html \
-./installer/resources/readme/readme_pt.html \
-./installer/resources/readme/readme_ru.html \
-./installer/resources/readme/readme_sv.html \
-./installer/resources/readme/readme_zh.html \
+./installer/resources/readme/readme*.html \
 ./installer/resources/small/toolbar.html \
 ./installer/resources/startconsole.html \
 ./router/java/src/net/i2p/data/i2np/package.html \
@@ -109,7 +93,7 @@ HTMLFILES="\
 echo 'Checking XML files....................'
 for i in $XMLFILES
 do
-	echo "Checking $i ..."
+	#echo "Checking $i ..."
 	xmllint --noout $i
         if [ $? -ne 0 ]
 	then
@@ -121,7 +105,7 @@ done
 echo 'Checking HTML files....................'
 for i in $HTMLFILES
 do
-	echo "Checking $i ..."
+	#echo "Checking $i ..."
 	xmllint --html --noout $i
 	# FIXME html mode never exits with an error code
 	# ... but it does output errors

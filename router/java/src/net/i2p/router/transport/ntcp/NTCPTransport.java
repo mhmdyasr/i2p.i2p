@@ -14,19 +14,27 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 
+import net.i2p.crypto.EncType;
+import net.i2p.crypto.KeyPair;
 import net.i2p.crypto.SigType;
+import net.i2p.data.Base64;
+import net.i2p.data.DataFormatException;
 import net.i2p.data.DataHelper;
 import net.i2p.data.Hash;
+import net.i2p.data.PublicKey;
+import net.i2p.data.PrivateKey;
 import net.i2p.data.router.RouterAddress;
 import net.i2p.data.router.RouterIdentity;
 import net.i2p.data.router.RouterInfo;
@@ -39,11 +47,14 @@ import net.i2p.router.transport.Transport;
 import static net.i2p.router.transport.Transport.AddressSource.*;
 import net.i2p.router.transport.TransportBid;
 import net.i2p.router.transport.TransportImpl;
+import net.i2p.router.transport.TransportManager;
 import net.i2p.router.transport.TransportUtil;
 import static net.i2p.router.transport.TransportUtil.IPv6Config.*;
 import net.i2p.router.transport.crypto.DHSessionKeyBuilder;
+import net.i2p.router.transport.crypto.X25519KeyFactory;
 import net.i2p.router.util.DecayingHashSet;
 import net.i2p.router.util.DecayingBloomFilter;
+import net.i2p.router.util.EventLog;
 import net.i2p.util.Addresses;
 import net.i2p.util.ConcurrentHashSet;
 import net.i2p.util.Log;
@@ -64,13 +75,14 @@ public class NTCPTransport extends TransportImpl {
     private final SharedBid _nearCapacityCostBid;
     private final SharedBid _transientFail;
     private final Object _conLock;
-    private final Map<Hash, NTCPConnection> _conByIdent;
+    private final ConcurrentHashMap<Hash, NTCPConnection> _conByIdent;
     private final EventPumper _pumper;
     private final Reader _reader;
     private net.i2p.router.transport.ntcp.Writer _writer;
     private int _ssuPort;
     /** synch on this */
     private final Set<InetSocketAddress> _endpoints;
+    private final int _networkID;
 
     /**
      * list of NTCPConnection of connections not yet established that we
@@ -94,29 +106,54 @@ public class NTCPTransport extends TransportImpl {
     public final static String PROP_I2NP_NTCP_AUTO_PORT = "i2np.ntcp.autoport";
     public final static String PROP_I2NP_NTCP_AUTO_IP = "i2np.ntcp.autoip";
     private static final String PROP_ADVANCED = "routerconsole.advanced";
-    public static final int DEFAULT_COST = 10;
+    private static final int DEFAULT_COST = 10;
+    private static final int NTCP2_OUTBOUND_COST = 14;
     
     /** this is rarely if ever used, default is to bind to wildcard address */
     public static final String PROP_BIND_INTERFACE = "i2np.ntcp.bindInterface";
 
     private final NTCPSendFinisher _finisher;
     private final DHSessionKeyBuilder.Factory _dhFactory;
+    private final X25519KeyFactory _xdhFactory;
     private long _lastBadSkew;
     private static final long[] RATES = { 10*60*1000 };
-
-    // Opera doesn't have the char, TODO check UA
-    //private static final String THINSP = "&thinsp;/&thinsp;";
-    private static final String THINSP = " / ";
 
     /**
      *  RI sigtypes supported in 0.9.16
      */
     public static final String MIN_SIGTYPE_VERSION = "0.9.16";
 
+    // NTCP2 stuff
+    public static final String STYLE = "NTCP";
+    public static final String STYLE2 = "NTCP2";
+    static final int NTCP2_INT_VERSION = 2;
+    /** "2" */
+    static final String NTCP2_VERSION = Integer.toString(NTCP2_INT_VERSION);
+    /** "2," */
+    static final String NTCP2_VERSION_ALT = NTCP2_VERSION + ',';
+    /** b64 static private key */
+    public static final String PROP_NTCP2_SP = "i2np.ntcp2.sp";
+    /** b64 static IV */
+    public static final String PROP_NTCP2_IV = "i2np.ntcp2.iv";
+    private static final int NTCP2_IV_LEN = OutboundNTCP2State.IV_SIZE;
+    private static final int NTCP2_KEY_LEN = OutboundNTCP2State.KEY_SIZE;
+    private static final long MIN_DOWNTIME_TO_REKEY = 30*24*60*60*1000L;
+    private final boolean _enableNTCP1;
+    private final boolean _enableNTCP2;
+    private final byte[] _ntcp2StaticPubkey;
+    private final byte[] _ntcp2StaticPrivkey;
+    private final byte[] _ntcp2StaticIV;
+    private final String _b64Ntcp2StaticPubkey;
+    private final String _b64Ntcp2StaticIV;
 
-    public NTCPTransport(RouterContext ctx, DHSessionKeyBuilder.Factory dh) {
+    /**
+     *  @param dh null to disable NTCP1
+     *  @param xdh null to disable NTCP2
+     */
+    public NTCPTransport(RouterContext ctx, DHSessionKeyBuilder.Factory dh, X25519KeyFactory xdh) {
         super(ctx);
         _dhFactory = dh;
+        _xdhFactory = xdh;
         _log = ctx.logManager().getLog(getClass());
 
         _context.statManager().createRateStat("ntcp.sendTime", "Total message lifetime when sent completely", "ntcp", RATES);
@@ -196,12 +233,101 @@ public class NTCPTransport extends TransportImpl {
         _reader = new Reader(ctx);
         _writer = new net.i2p.router.transport.ntcp.Writer(ctx);
 
+        _networkID = ctx.router().getNetworkID();
         _fastBid = new SharedBid(25); // best
         _slowBid = new SharedBid(70); // better than ssu unestablished, but not better than ssu established
         _slowCostBid = new SharedBid(85);
         _nearCapacityBid = new SharedBid(90); // not better than ssu - save our conns for inbound
         _nearCapacityCostBid = new SharedBid(105);
         _transientFail = new SharedBid(TransportBid.TRANSIENT_FAIL);
+
+        setupPort();
+        _enableNTCP1 = dh != null;
+        _enableNTCP2 = xdh != null;
+        if (!_enableNTCP1 && !_enableNTCP2)
+            throw new IllegalArgumentException();
+        if (_enableNTCP2) {
+            boolean shouldSave = false;
+            byte[] priv = null;
+            byte[] iv = null;
+            String b64IV = null;
+            String s = null;
+            // try to determine if we've been down for 30 days or more
+            // no stopping, no crashes, and only one start (this one)
+            EventLog el = _context.router().eventLog();
+            long since = _context.clock().now() - MIN_DOWNTIME_TO_REKEY;
+            boolean shouldRekey = el.getEvents(EventLog.STOPPED, since).isEmpty() &&
+                                  el.getEvents(EventLog.CRASHED, since).isEmpty() &&
+                                  el.getEvents(EventLog.STARTED, since).size() <= 1;
+            if (!shouldRekey) {
+                s = ctx.getProperty(PROP_NTCP2_SP);
+                if (s != null) {
+                    priv = Base64.decode(s);
+                }
+            }
+            if (priv == null || priv.length != NTCP2_KEY_LEN) {
+                KeyPair keys = xdh.getKeys();
+                _ntcp2StaticPrivkey = keys.getPrivate().getData();
+                _ntcp2StaticPubkey = keys.getPublic().getData();
+                shouldSave = true;
+            } else {
+                _ntcp2StaticPrivkey = priv;
+                _ntcp2StaticPubkey = (new PrivateKey(EncType.ECIES_X25519, priv)).toPublic().getData();
+            }
+            if (!shouldSave) {
+                s = ctx.getProperty(PROP_NTCP2_IV);
+                if (s != null) {
+                    iv = Base64.decode(s);
+                    b64IV = s;
+                }
+            }
+            if (iv == null || iv.length != NTCP2_IV_LEN) {
+                iv = new byte[NTCP2_IV_LEN];
+                do {
+                    ctx.random().nextBytes(iv);
+                } while (DataHelper.eq(iv, 0, OutboundNTCP2State.ZEROKEY, 0, NTCP2_IV_LEN));
+                shouldSave = true;
+            }
+            if (shouldSave) {
+                Map<String, String> changes = new HashMap<String, String>(2);
+                String b64Priv = Base64.encode(_ntcp2StaticPrivkey);
+                b64IV = Base64.encode(iv);
+                changes.put(PROP_NTCP2_SP, b64Priv);
+                changes.put(PROP_NTCP2_IV, b64IV);
+                ctx.router().saveConfig(changes, null);
+            }
+            _ntcp2StaticIV = iv;
+            _b64Ntcp2StaticPubkey = Base64.encode(_ntcp2StaticPubkey);
+            _b64Ntcp2StaticIV = b64IV;
+        } else {
+            _ntcp2StaticPubkey = null;
+            _ntcp2StaticPrivkey = null;
+            _ntcp2StaticIV = null;
+            _b64Ntcp2StaticPubkey = null;
+            _b64Ntcp2StaticIV = null;
+        }
+    }
+    
+    /**
+     *  Pick a port if not previously configured.
+     *  Only if UDP is disabled.
+     *
+     *  @since 0.9.39
+     */
+    private void setupPort() {
+        if (_context.getBooleanPropertyDefaultTrue(TransportManager.PROP_ENABLE_UDP))
+            return;
+        int port = getRequestedPort();
+        if (port > 0 && !TransportUtil.isValidPort(port)) {
+            TransportUtil.logInvalidPort(_log, STYLE, port);
+        }
+        if (port <= 0) {
+            port = TransportUtil.selectRandomPort(_context, STYLE);
+            Map<String, String> changes = new HashMap<String, String>(2);
+            changes.put(PROP_I2NP_NTCP_PORT, Integer.toString(port));
+            _context.router().saveConfig(changes, null);
+            _log.logAlways(Log.INFO, "NTCP selected random port " + port);
+        }
     }
 
     /**
@@ -234,19 +360,30 @@ public class NTCPTransport extends TransportImpl {
             RouterIdentity ident = target.getIdentity();
             Hash ih = ident.calculateHash();
             NTCPConnection con = null;
-            boolean isNew = false;
+            int newVersion = 0;
             boolean fail = false;
             synchronized (_conLock) {
                 con = _conByIdent.get(ih);
                 if (con == null) {
-                    isNew = true;
                     RouterAddress addr = getTargetAddress(target);
                     if (addr != null) {
-                        con = new NTCPConnection(_context, this, ident, addr);
-                        //if (_log.shouldLog(Log.DEBUG))
-                        //    _log.debug("Send on a new con: " + con + " at " + addr + " for " + ih);
-                        // Note that outbound conns go in the map BEFORE establishment
-                        _conByIdent.put(ih, con);
+                        newVersion = getNTCPVersion(addr);
+                        if (newVersion != 0) {
+                            try {
+                                con = new NTCPConnection(_context, this, ident, addr, newVersion);
+                                establishing(con);
+                                //if (_log.shouldLog(Log.DEBUG))
+                                //    _log.debug("Send on a new con: " + con + " at " + addr + " for " + ih);
+                                // Note that outbound conns go in the map BEFORE establishment
+                                _conByIdent.put(ih, con);
+                            } catch (DataFormatException dfe) {
+                                if (_log.shouldWarn())
+                                    _log.warn("bad address? " + target, dfe);
+                                fail = true;
+                            }
+                        } else {
+                            fail = true;
+                        }
                     } else {
                         // race, RI changed out from under us
                         // call afterSend below outside of conLock
@@ -261,9 +398,7 @@ public class NTCPTransport extends TransportImpl {
                 afterSend(msg, false);
                 return;
             }
-            if (isNew) {
-                // doesn't do anything yet, just enqueues it
-                con.send(msg);
+            if (newVersion != 0) {
                 // As of 0.9.12, don't send our info if the first message is
                 // doing the same (common when connecting to a floodfill).
                 // Also, put the info message after whatever we are trying to send
@@ -271,16 +406,27 @@ public class NTCPTransport extends TransportImpl {
                 // Prior to 0.9.12, Bob would not send his RI unless he had ours,
                 // but that's fixed in 0.9.12.
                 boolean shouldSkipInfo = false;
+                boolean shouldFlood = false;
                 I2NPMessage m = msg.getMessage();
                 if (m.getType() == DatabaseStoreMessage.MESSAGE_TYPE) {
                     DatabaseStoreMessage dsm = (DatabaseStoreMessage) m;
                     if (dsm.getKey().equals(_context.routerHash())) {
                         shouldSkipInfo = true;
+                        shouldFlood = dsm.getReplyToken() != 0;
+                        // TODO tell the NTCP2 con to flood in the handshake and mark success when sent
                     }
                 }
                 if (!shouldSkipInfo) {
+                    // Queue the message, and our RI
+                    // doesn't do anything yet, just enqueues it
+                    con.send(msg);
                     con.enqueueInfoMessage();
+                } else if (shouldFlood || newVersion == 1) {
+                    // Queue the message, which is a DSM of our RI
+                    con.send(msg);
                 } else if (_log.shouldLog(Log.INFO)) {
+                    // Send nothing, the handshake has the RI
+                    // version == 2 && shouldSkipInfo && !shouldFlood
                     _log.info("SKIPPING INFO message: " + con);
                 }
 
@@ -295,6 +441,11 @@ public class NTCPTransport extends TransportImpl {
                         _log.error("Error opening a channel", ioe);
                     _context.statManager().addRateData("ntcp.outboundFailedIOEImmediate", 1);
                     con.close();
+                    afterSend(msg, false);
+                } catch (IllegalStateException ise) {
+                    if (_log.shouldWarn())
+                        _log.warn("Failed opening a channel", ise);
+                    afterSend(msg, false);
                 }
             } else {
                 con.send(msg);
@@ -349,11 +500,15 @@ public class NTCPTransport extends TransportImpl {
         super.afterSend(msg, sendSuccessful, allowRequeue, msToSend);
     }
 
-    public TransportBid bid(RouterInfo toAddress, long dataSize) {
+    public TransportBid bid(RouterInfo toAddress, int dataSize) {
         if (!isAlive())
             return null;
-        if (dataSize > NTCPConnection.MAX_MSG_SIZE) {
-            // let SSU deal with it
+        // passed in dataSize assumes 16 byte header, if NTCP2 then
+        // we have a 9-byte header so there's 7 to spare
+        if (dataSize > NTCPConnection.NTCP2_MAX_MSG_SIZE + 7 ||
+            (!_enableNTCP2 && dataSize > NTCPConnection.NTCP1_MAX_MSG_SIZE)) {
+            // Too big for NTCP2, or NTCP2 disabled and too big for NTCP1
+            // Let SSU deal with it
             _context.statManager().addRateData("ntcp.noBidTooLargeI2NP", dataSize);
             return null;
         }
@@ -368,11 +523,28 @@ public class NTCPTransport extends TransportImpl {
             return null;
         }
 
-        boolean established = isEstablished(toAddress.getIdentity());
+        boolean established = isEstablished(peer);
         if (established) { // should we check the queue size?  nah, if its valid, use it
-            //if (_log.shouldLog(Log.DEBUG))
-            //    _log.debug("fast bid when trying to send to " + peer + " as its already established");
+            if (dataSize > NTCPConnection.NTCP1_MAX_MSG_SIZE) {
+                // Must be version 2 to send a big message
+                NTCPConnection con = _conByIdent.get(peer);
+                if (con == null || con.getVersion() < NTCP2_INT_VERSION) {
+                    _context.statManager().addRateData("ntcp.noBidTooLargeI2NP", dataSize);
+                    return null;
+                }
+            }
             return _fastBid;
+        }
+        if (toAddress.getNetworkId() != _networkID) {
+            _context.banlist().banlistRouterForever(peer, "Not in our network: " + toAddress.getNetworkId());
+            markUnreachable(peer);
+            return null;    
+        }
+        if (dataSize > NTCPConnection.NTCP1_MAX_MSG_SIZE) {
+            // Not established, too big for NTCP 1, let SSU deal with it
+            // TODO look at his addresses to see if NTCP2 supported?
+            _context.statManager().addRateData("ntcp.noBidTooLargeI2NP", dataSize);
+            return null;
         }
 
         RouterAddress addr = getTargetAddress(toAddress);
@@ -434,6 +606,10 @@ public class NTCPTransport extends TransportImpl {
         List<RouterAddress> addrs = getTargetAddresses(target);
         for (int i = 0; i < addrs.size(); i++) {
             RouterAddress addr = addrs.get(i);
+            // use this to skip outbound-only NTCP2,
+            // and NTCP1 if disabled
+            if (getNTCPVersion(addr) == 0)
+                continue;
             byte[] ip = addr.getIP();
             if (!TransportUtil.isValidPort(addr.getPort()) || ip == null) {
                 //_context.statManager().addRateData("ntcp.connectFailedInvalidPort", 1);
@@ -471,15 +647,11 @@ public class NTCPTransport extends TransportImpl {
     }
 
     public boolean allowConnection() {
-        return countActivePeers() < getMaxConnections();
+        return _conByIdent.size() < getMaxConnections();
     }
 
     /** queue up afterSend call, which can take some time w/ jobs, etc */
     void sendComplete(OutNetMessage msg) { _finisher.add(msg); }
-
-    private boolean isEstablished(RouterIdentity peer) {
-        return isEstablished(peer.calculateHash());
-    }
 
     @Override
     public boolean isEstablished(Hash dest) {
@@ -509,14 +681,32 @@ public class NTCPTransport extends TransportImpl {
     }
 
     /**
+     * Tell the transport to disconnect from this peer.
+     *
+     * @since 0.9.38
+     */
+    public void forceDisconnect(Hash peer) {
+        NTCPConnection con = _conByIdent.remove(peer);
+        if (con != null) {
+            if (_log.shouldWarn())
+                _log.warn("Force disconnect of " + peer, new Exception("I did it"));
+            con.close();
+        }
+    }
+
+    /**
      * @return usually the con passed in, but possibly a second connection with the same peer...
+     *         only con or null as of 0.9.37
      */
     NTCPConnection removeCon(NTCPConnection con) {
         NTCPConnection removed = null;
         RouterIdentity ident = con.getRemotePeer();
         if (ident != null) {
             synchronized (_conLock) {
-                removed = _conByIdent.remove(ident.calculateHash());
+                // only remove the con passed in
+                //removed = _conByIdent.remove(ident.calculateHash());
+                if (_conByIdent.remove(ident.calculateHash(), con))
+                    removed = con;
             }
         }
         return removed;
@@ -557,12 +747,13 @@ public class NTCPTransport extends TransportImpl {
      * As of 0.9.20, actually returns active peer count, not total.
      */
     public int countActivePeers() {
+        final long now = _context.clock().now();
         int active = 0;
         for (NTCPConnection con : _conByIdent.values()) {
             // con initializes times at construction,
             // so check message count also
-            if ((con.getMessagesSent() > 0 && con.getTimeSinceSend() <= 5*60*1000) ||
-                (con.getMessagesReceived() > 0 && con.getTimeSinceReceive() <= 5*60*1000)) {
+            if ((con.getMessagesSent() > 0 && con.getTimeSinceSend(now) <= 5*60*1000) ||
+                (con.getMessagesReceived() > 0 && con.getTimeSinceReceive(now) <= 5*60*1000)) {
                 active++;
             }
         }
@@ -573,11 +764,12 @@ public class NTCPTransport extends TransportImpl {
      * How many peers are we actively sending messages to (this minute)
      */
     public int countActiveSendPeers() {
+        final long now = _context.clock().now();
         int active = 0;
         for (NTCPConnection con : _conByIdent.values()) {
             // con initializes times at construction,
             // so check message count also
-            if (con.getMessagesSent() > 0 && con.getTimeSinceSend() <= 60*1000) {
+            if (con.getMessagesSent() > 0 && con.getTimeSinceSend(now) <= 60*1000) {
                 active++;
             }
         }
@@ -607,6 +799,7 @@ public class NTCPTransport extends TransportImpl {
         long tooOld = _context.clock().now() - 10*60*1000;
 
         for (NTCPConnection con : _conByIdent.values()) {
+            // TODO skip isEstablished() check?
             if (con.isEstablished() && con.getCreated() > tooOld)
                 skews.addElement(Long.valueOf(con.getClockSkew()));
         }
@@ -626,7 +819,7 @@ public class NTCPTransport extends TransportImpl {
      *  As there is no timestamp in the first message, we can't detect
      *  something long-delayed. To be fixed in next version of NTCP.
      *
-     *  @param hxhi 32 bytes
+     *  @param hxhi using first 8 bytes only
      *  @return valid
      *  @since 0.9.12
      */
@@ -661,6 +854,8 @@ public class NTCPTransport extends TransportImpl {
         else
             // received by externalAddressReceived() from TransportManager
             port = _ssuPort;
+        boolean isFixedOrForceFirewalled = _context.getProperty(PROP_I2NP_NTCP_AUTO_IP, "true")
+                                           .toLowerCase(Locale.US).equals("false");
         RouterAddress myAddress = bindAddress(port);
         if (myAddress != null) {
             // fixed interface, or bound to the specified host
@@ -668,18 +863,37 @@ public class NTCPTransport extends TransportImpl {
         } else if (addr != null) {
             // specified host, bound to wildcard
             replaceAddress(addr);
-        } else if (port > 0) {
+        } else if (port > 0 && !isFixedOrForceFirewalled) {
             // all detected interfaces
-            for (InetAddress ia : getSavedLocalAddresses()) {
-                OrderedProperties props = new OrderedProperties();
-                props.setProperty(RouterAddress.PROP_HOST, ia.getHostAddress());
-                props.setProperty(RouterAddress.PROP_PORT, Integer.toString(port));
-                int cost = getDefaultCost(ia instanceof Inet6Address);
-                myAddress = new RouterAddress(STYLE, props, cost);
-                replaceAddress(myAddress);
+            Collection<InetAddress> addrs = getSavedLocalAddresses();
+            if (!addrs.isEmpty()) {
+                for (InetAddress ia : addrs) {
+                    OrderedProperties props = new OrderedProperties();
+                    props.setProperty(RouterAddress.PROP_HOST, ia.getHostAddress());
+                    props.setProperty(RouterAddress.PROP_PORT, Integer.toString(port));
+                    addNTCP2Options(props);
+                    int cost = getDefaultCost(ia instanceof Inet6Address);
+                    myAddress = new RouterAddress(getPublishStyle(), props, cost);
+                    replaceAddress(myAddress);
+                }
+            } else if (_enableNTCP2) {
+                setOutboundNTCP2Address();
             }
+        } else if (_enableNTCP2) {
+            setOutboundNTCP2Address();
         }
         // TransportManager.startListening() calls router.rebuildRouterInfo()
+    }
+
+    /**
+     *  Outbound only, NTCP2 with "s" and "v" only
+     *  @since 0.9.36
+     */
+    private void setOutboundNTCP2Address() {
+        OrderedProperties props = new OrderedProperties();
+        addNTCP2Options(props);
+        RouterAddress myAddress = new RouterAddress(STYLE2, props, NTCP2_OUTBOUND_COST);
+        replaceAddress(myAddress);
     }
 
     /**
@@ -786,8 +1000,9 @@ public class NTCPTransport extends TransportImpl {
                     OrderedProperties props = new OrderedProperties();
                     props.setProperty(RouterAddress.PROP_HOST, bindTo);
                     props.setProperty(RouterAddress.PROP_PORT, Integer.toString(port));
+                    addNTCP2Options(props);
                     int cost = getDefaultCost(false);
-                    myAddress = new RouterAddress(STYLE, props, cost);
+                    myAddress = new RouterAddress(getPublishStyle(), props, cost);
                 }
                 if (!_endpoints.isEmpty()) {
                     // If we are already bound to the new address, OR
@@ -808,6 +1023,7 @@ public class NTCPTransport extends TransportImpl {
                     _log.error("Specified NTCP port is " + port + ", ports lower than 1024 not recommended");
                 ServerSocketChannel chan = ServerSocketChannel.open();
                 chan.configureBlocking(false);
+                // TODO retry
                 chan.socket().bind(addr);
                 _endpoints.add(addr);
                 if (_log.shouldLog(Log.INFO))
@@ -870,7 +1086,28 @@ public class NTCPTransport extends TransportImpl {
      */
     net.i2p.router.transport.ntcp.Writer getWriter() { return _writer; }
 
+    /**
+     * @return always "NTCP" even if NTCP1 is disabled
+     */
     public String getStyle() { return STYLE; }
+
+    /**
+     * An alternate supported style, or null.
+     * @return "NTCP2" or null
+     * @since 0.9.35
+     */
+    @Override
+    public String getAltStyle() {
+        return _enableNTCP2 ? STYLE2 : null;
+    }
+
+    /**
+     * @return "NTCP" if NTCP1 is enabled, else "NTCP2"
+     * @since 0.9.39
+     */
+    private String getPublishStyle() {
+        return _enableNTCP1 ? STYLE : STYLE2;
+    }
 
     /**
      *  Hook for NTCPConnection
@@ -878,10 +1115,19 @@ public class NTCPTransport extends TransportImpl {
     EventPumper getPumper() { return _pumper; }
 
     /**
+     *  @return null if not configured for NTCP1
      *  @since 0.9
      */
     DHSessionKeyBuilder getDHBuilder() {
-        return _dhFactory.getBuilder();
+        return _dhFactory != null ? _dhFactory.getBuilder() : null;
+    }
+
+    /**
+     *  @return null if not configured for NTCP2
+     *  @since 0.9.36
+     */
+    X25519KeyFactory getXDHFactory() {
+        return _xdhFactory;
     }
 
     /**
@@ -892,7 +1138,8 @@ public class NTCPTransport extends TransportImpl {
      * @since 0.9.16
      */
     void returnUnused(DHSessionKeyBuilder builder) {
-        _dhFactory.returnUnused(builder);
+        if (_dhFactory != null)
+            _dhFactory.returnUnused(builder);
     }
 
     /**
@@ -912,12 +1159,13 @@ public class NTCPTransport extends TransportImpl {
      */
     void expireTimedOut() {
         int expired = 0;
+        final long now = _context.clock().now();
 
             for (Iterator<NTCPConnection> iter = _establishing.iterator(); iter.hasNext(); ) {
                 NTCPConnection con = iter.next();
                 if (con.isClosed() || con.isEstablished()) {
                     iter.remove();
-                } else if (con.getTimeSinceCreated() > ESTABLISH_TIMEOUT) {
+                } else if (con.getTimeSinceCreated(now) > ESTABLISH_TIMEOUT) {
                     iter.remove();
                     con.close();
                     expired++;
@@ -982,9 +1230,103 @@ public class NTCPTransport extends TransportImpl {
         OrderedProperties props = new OrderedProperties();
         props.setProperty(RouterAddress.PROP_HOST, name);
         props.setProperty(RouterAddress.PROP_PORT, Integer.toString(p));
+        addNTCP2Options(props);
         int cost = getDefaultCost(false);
-        RouterAddress addr = new RouterAddress(STYLE, props, cost);
+        RouterAddress addr = new RouterAddress(getPublishStyle(), props, cost);
         return addr;
+    }
+
+    /**
+     * Add the required options to the properties for a NTCP2 address.
+     * Host/port must already be set in props if they are going to be.
+     *
+     * @since 0.9.35
+     */
+    private void addNTCP2Options(Properties props) {
+        if (!_enableNTCP2)
+            return;
+        // only set i if we are not firewalled
+        if (props.containsKey("host"))
+            props.setProperty("i", _b64Ntcp2StaticIV);
+        props.setProperty("s", _b64Ntcp2StaticPubkey);
+        props.setProperty("v", NTCP2_VERSION);
+    }
+
+    /**
+     * Is NTCP1 enabled?
+     *
+     * @since 0.9.39
+     */
+    boolean isNTCP1Enabled() { return _enableNTCP1; }
+
+    /**
+     * Is NTCP2 enabled?
+     *
+     * @since 0.9.35
+     */
+    boolean isNTCP2Enabled() { return _enableNTCP2; }
+
+    /**
+     * The static priv key
+     *
+     * @since 0.9.36
+     */
+    byte[] getNTCP2StaticPubkey() {
+        return _ntcp2StaticPubkey;
+    }
+
+    /**
+     * The static priv key
+     *
+     * @since 0.9.35
+     */
+    byte[] getNTCP2StaticPrivkey() {
+        return _ntcp2StaticPrivkey;
+    }
+
+    /**
+     * The static IV
+     *
+     * @since 0.9.36
+     */
+    byte[] getNTCP2StaticIV() {
+        return _ntcp2StaticIV;
+    }
+
+    /**
+     * Get the valid NTCP version of Bob's NTCP address
+     * for our outbound connections as Alice.
+     *
+     * @return the valid version 1 or 2, or 0 if unusable
+     * @since 0.9.35
+     */
+    private int getNTCPVersion(RouterAddress addr) {
+        int rv;
+        String style = addr.getTransportStyle();
+        if (style.equals(STYLE)) {
+            if (!_enableNTCP2)
+                return 1;
+            rv = 1;
+        } else if (style.equals(STYLE2)) {
+            if (!_enableNTCP2)
+                return 0;
+            rv = NTCP2_INT_VERSION;
+        } else {
+            return 0;
+        }
+        // check version == "2" || version starts with "2,"
+        // and static key, and iv
+        String v = addr.getOption("v");
+        if (v == null ||
+            addr.getOption("i") == null ||
+            addr.getOption("s") == null ||
+            (!v.equals(NTCP2_VERSION) && !v.startsWith(NTCP2_VERSION_ALT))) {
+            // his address is NTCP1 or is outbound NTCP2 only
+            return (rv == 1 && _enableNTCP1) ? 1 : 0;
+        }
+        // his address is NTCP2
+        // do not validate the s/i b64, we will just catch it later
+        return NTCP2_INT_VERSION;
     }
 
     /**
@@ -1120,8 +1462,9 @@ public class NTCPTransport extends TransportImpl {
             }
             return;
         }
-        // ignore UPnP for now, get everything from SSU
-        if (source != SOURCE_SSU)
+        // ignore UPnP for now, get everything from SSU if it's enabled
+        if (source != SOURCE_SSU &&
+            _context.getBooleanPropertyDefaultTrue(TransportManager.PROP_ENABLE_UDP))
             return;
         boolean isIPv6 = ip != null && ip.length == 16;
         externalAddressReceived(ip, isIPv6, port);
@@ -1147,8 +1490,9 @@ public class NTCPTransport extends TransportImpl {
     public void externalAddressRemoved(AddressSource source, boolean ipv6) {
         if (_log.shouldWarn())
             _log.warn("Removing address, ipv6? " + ipv6 + " from: " + source, new Exception());
-        // ignore UPnP for now, get everything from SSU
-        if (source != SOURCE_SSU)
+        // ignore UPnP for now, get everything from SSU if it's enabled
+        if (source != SOURCE_SSU &&
+            _context.getBooleanPropertyDefaultTrue(TransportManager.PROP_ENABLE_UDP))
             return;
         externalAddressReceived(null, ipv6, 0);
     }    
@@ -1175,7 +1519,7 @@ public class NTCPTransport extends TransportImpl {
             cost = oldAddr.getCost();
             newProps.putAll(oldAddr.getOptionsMap());
         }
-        RouterAddress newAddr = new RouterAddress(STYLE, newProps, cost);
+        RouterAddress newAddr = new RouterAddress(getPublishStyle(), newProps, cost);
 
         boolean changed = false;
 
@@ -1246,6 +1590,8 @@ public class NTCPTransport extends TransportImpl {
                 return;
             if (ohost == null || ! ohost.equalsIgnoreCase(nhost)) {
                 newProps.setProperty(RouterAddress.PROP_HOST, nhost);
+                if (cost == NTCP2_OUTBOUND_COST)
+                    newAddr.setCost(DEFAULT_COST);
                 changed = true;
             }
         } else if (enabled.equals("false") &&
@@ -1257,6 +1603,8 @@ public class NTCPTransport extends TransportImpl {
             if (_log.shouldLog(Log.INFO))
                 _log.info("old host: " + ohost + " config: " + name + " new: " + name);
             newProps.setProperty(RouterAddress.PROP_HOST, name);
+            if (cost == NTCP2_OUTBOUND_COST)
+                newAddr.setCost(DEFAULT_COST);
             changed = true;
         } else if (ohost == null || ohost.length() <= 0) {
             return;
@@ -1267,7 +1615,13 @@ public class NTCPTransport extends TransportImpl {
             // we are still firewalled (SW firewall, bad UPnP indication, etc.)
             if (_log.shouldLog(Log.INFO))
                 _log.info("old host: " + ohost + " config: " + name + " new: null");
-            newAddr = null;
+            if (_enableNTCP2) {
+                // addNTCP2Options() called below
+                newProps.clear();
+                newAddr = new RouterAddress(STYLE2, newProps, NTCP2_OUTBOUND_COST);
+            } else {
+                newAddr = null;
+            }
             changed = true;
         }
 
@@ -1292,6 +1646,7 @@ public class NTCPTransport extends TransportImpl {
                 return;
             }
         }
+        addNTCP2Options(newProps);
 
         // stopListening stops the pumper, readers, and writers, so required even if
         // oldAddr == null since startListening starts them all again
@@ -1330,6 +1685,14 @@ public class NTCPTransport extends TransportImpl {
                 _log.warn("UPnP has opened the NTCP port: " + port + " via " + Addresses.toString(ip, externalPort));
             else
                 _log.warn("UPnP has failed to open the NTCP port: " + port + " reason: " + reason);
+        }
+        // ignore UPnP for now, get everything from SSU if it's enabled
+        if (!_context.getBooleanPropertyDefaultTrue(TransportManager.PROP_ENABLE_UDP)) {
+            // TODO
+            //if (success && ip != null && getExternalIP() != null) {
+            //    if (!isIPv4Firewalled())
+            //        setReachabilityStatus(Status.IPV4_OK_IPV6_UNKNOWN);
+            //}
         }
     }
 
@@ -1462,8 +1825,6 @@ public class NTCPTransport extends TransportImpl {
         _lastInboundIPv4 = 0;
         _lastInboundIPv6 = 0;
     }
-
-    public static final String STYLE = "NTCP";
 
     public void renderStatusHTML(java.io.Writer out, int sortFlags) throws IOException {}
 

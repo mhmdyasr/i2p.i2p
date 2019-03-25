@@ -21,7 +21,11 @@
 
 package i2p.susi.dns;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.Writer;
 import java.util.Arrays;
 import java.util.ArrayList;
@@ -34,9 +38,11 @@ import java.util.Properties;
 import java.util.SortedMap;
 
 import net.i2p.client.naming.NamingService;
+import net.i2p.client.naming.SingleFileNamingService;
 import net.i2p.data.DataFormatException;
 import net.i2p.data.DataHelper;
 import net.i2p.data.Destination;
+import net.i2p.servlet.RequestWrapper;
 
 /**
  *  Talk to the NamingService API instead of modifying the hosts.txt files directly,
@@ -48,6 +54,7 @@ public class NamingServiceBean extends AddressbookBean
 {
 	private static final String DEFAULT_NS = "BlockfileNamingService";
 	private String detail;
+	private String notes;
 
 	private boolean isDirect() {
 		return getBook().equals("published");
@@ -355,12 +362,71 @@ public class NamingServiceBean extends AddressbookBean
 		action = null;
 		
 		if( message.length() > 0 )
-			message = "<p class=\"messages\">" + message + "</p>";
+			message = styleMessage(message);
 		return message;
+	}
+
+	/**
+	 *  @since 0.9.35
+	 */
+        public void saveNotes() {
+		if (action == null || !action.equals(_t("Save Notes")) ||
+		    destination == null || detail == null || isDirect() ||
+		    serial == null || !serial.equals(lastSerial))
+			return;
+		Properties nsOptions = new Properties();
+		List<Properties> propsList = new ArrayList<Properties>(4);
+		nsOptions.setProperty("list", getFileName());
+		List<Destination> dests = getNamingService().lookupAll(detail, nsOptions, propsList);
+		if (dests == null)
+			return;
+		for (int i = 0; i < dests.size(); i++) {
+			if (!dests.get(i).toBase64().equals(destination))
+				continue;
+			Properties props = propsList.get(i);
+			if (notes != null && notes.length() > 0) {
+				byte[] nbytes = DataHelper.getUTF8(notes);
+	                        if (nbytes.length > 255) {
+					// violently truncate, possibly splitting a char
+					byte[] newbytes = new byte[255];
+					System.arraycopy(nbytes, 0, newbytes, 0, 255);
+					notes = DataHelper.getUTF8(newbytes);
+					// drop replacement char or split pair
+					int last = notes.length() - 1;
+					char lastc = notes.charAt(last);
+					if (lastc == (char) 0xfffd || Character.isHighSurrogate(lastc))
+						notes = notes.substring(0, last);
+				}
+				props.setProperty("notes", notes);
+			} else {
+				// not working
+				//props.remove("notes");
+				props.setProperty("notes", "");
+			}
+			props.setProperty("list", getFileName());
+                        String now = Long.toString(_context.clock().now());
+                       	props.setProperty("m", now);
+			if (dests.size() > 1) {
+				// we don't have any API to update properties on a single dest
+				// so remove and re-add
+				getNamingService().remove(detail, dests.get(i), nsOptions);
+				getNamingService().addDestination(detail, dests.get(i), props);
+			} else {
+				getNamingService().put(detail, dests.get(i), props);
+			}
+			return;
+		}
 	}
 
 	public void setH(String h) {
 		this.detail = DataHelper.stripHTML(h);
+	}
+
+	/**
+	 *  @since 0.9.35
+	 */
+	public void setNofilter_notes(String n) {
+		notes = n;
 	}
 
 	public AddressBean getLookup() {
@@ -432,5 +498,96 @@ public class NamingServiceBean extends AddressbookBean
 			searchProps.setProperty("search", search.toLowerCase(Locale.US));
 		getNamingService().export(out, searchProps);
 		// No post-filtering for hosts.txt naming services. It is what it is.
+	}
+
+	/**
+	 *  @return messages about this action
+	 *  @since 0.9.40
+	 */
+	public String importFile(RequestWrapper wrequest) throws IOException {
+		String message = "";
+		InputStream in = wrequest.getInputStream("file");
+		OutputStream out = null;
+		File tmp = null;
+		SingleFileNamingService sfns = null;
+		try {
+			// non-null but zero bytes if no file entered, don't know why
+			if (in == null || in.available() <= 0) {
+				return styleMessage(_t("You must enter a file"));
+			}
+			// copy to temp file
+			tmp = new File(_context.getTempDir(), "susidns-import-" + _context.random().nextLong() + ".txt");
+			out = new FileOutputStream(tmp);
+			DataHelper.copy(in, out);
+                        in.close();
+                        in = null;
+                        out.close();
+                        out = null;
+			// new SingleFileNamingService
+			sfns = new SingleFileNamingService(_context, tmp.getAbsolutePath());
+			// getEntries, copy over
+			Map<String, Destination> entries = sfns.getEntries();
+			int count = entries.size();
+			if (count <= 0) {
+				return styleMessage(_t("No entries found in file"));
+			} else {
+				NamingService service = getNamingService();
+				int added = 0, dup = 0;
+				Properties nsOptions = new Properties();
+				nsOptions.setProperty("list", getFileName());
+	                        String now = Long.toString(_context.clock().now());
+	                       	nsOptions.setProperty("m", now);
+				String filename = wrequest.getFilename("file");
+				if (filename != null)
+					nsOptions.setProperty("s", _t("Imported from file {0}", filename));
+				else
+					nsOptions.setProperty("s", _t("Imported from file"));
+				for (Map.Entry<String, Destination> e : entries.entrySet()) {
+					String host = e.getKey();
+					Destination dest = e.getValue();
+					boolean ok = service.putIfAbsent(host, dest, nsOptions);
+					if (ok)
+						added++;
+					else
+						dup++;
+				}
+				StringBuilder buf = new StringBuilder(128);
+				if (added > 0)
+					buf.append(styleMessage(ngettext("Loaded {0} entry from file",
+				                                         "Loaded {0} entries from file",
+				                                         added)));
+				if (dup > 0)
+					buf.append(styleMessage(ngettext("Skipped {0} duplicate entry from file",
+				                                         "Skipped {0} duplicate entries from file",
+				                                         dup)));
+				return buf.toString();
+			}
+		} catch (IOException ioe) {
+			return styleMessage(_t("Import from file failed") + " - " + ioe);
+		} finally {
+			if (in != null)
+				try { in.close(); } catch (IOException ioe) {}
+			if (out != null)
+				try { out.close(); } catch (IOException ioe) {}
+			// shutdown SFNS
+			if (sfns != null)
+			    sfns.shutdown();
+			if (tmp != null)
+			    tmp.delete();
+		}
+	}
+
+	/**
+	 *  @since 0.9.40
+	 */
+	private static String styleMessage(String message) {
+		return "<p class=\"messages\">" + message + "</p>";
+	}
+	
+	/**
+	 *  @since 0.9.34
+	 */
+	public boolean haveImagegen() {
+		return _context.portMapper().isRegistered("imagegen");
 	}
 }

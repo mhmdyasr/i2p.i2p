@@ -4,6 +4,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -49,11 +50,6 @@ class OutboundMessageFragments {
      *  The long-lived iterator over _activePeers.
      */
     private Iterator<PeerState> _iterator;
-
-    /**
-     *  Avoid sync in add() if possible (not 100% reliable)
-     */
-    private boolean _isWaiting;
 
     private volatile boolean _alive;
     private final PacketBuilder _builder;
@@ -103,7 +99,7 @@ class OutboundMessageFragments {
         _alive = false;
         _activePeers.clear();
         synchronized (_activePeers) {
-            _activePeers.notifyAll();
+            _activePeers.notify();
         }
     }
 
@@ -164,7 +160,7 @@ class OutboundMessageFragments {
             // will throw IAE if peer == null
             OutboundMessageState state = new OutboundMessageState(_context, msg, peer);
             peer.add(state);
-            add(peer);
+            add(peer, state.fragmentSize(0));
         } catch (IllegalArgumentException iae) {
             _transport.failed(msg, "Peer disconnected quickly");
             return;
@@ -181,7 +177,7 @@ class OutboundMessageFragments {
         if (peer == null)
             throw new RuntimeException("null peer for " + state);
         peer.add(state);
-        add(peer);
+        add(peer, state.fragmentSize(0));
         //_context.statManager().addRateData("udp.outboundActiveCount", active, 0);
     }
 
@@ -194,10 +190,15 @@ class OutboundMessageFragments {
         if (peer == null)
             throw new RuntimeException("null peer");
         int sz = states.size();
+        int min = peer.fragmentSize();
         for (int i = 0; i < sz; i++) {
-            peer.add(states.get(i));
+            OutboundMessageState state = states.get(i);
+            peer.add(state);
+            int fsz = state.fragmentSize(0);
+            if (fsz < min)
+                min = fsz;
         }
-        add(peer);
+        add(peer, min);
         //_context.statManager().addRateData("udp.outboundActiveCount", active, 0);
     }
 
@@ -210,10 +211,10 @@ class OutboundMessageFragments {
      * There are larger chances of adding the PeerState "behind" where
      * the iterator is now... but these issues are the same as before concurrentification.
      *
+     * @param size the minimum size we can send, or 0 to always notify
      * @since 0.8.9
      */
-    public void add(PeerState peer) {
-        boolean wasEmpty = _activePeers.isEmpty();
+    public void add(PeerState peer, int size) {
         boolean added = _activePeers.add(peer);
         if (added) {
             if (_log.shouldLog(Log.DEBUG))
@@ -228,9 +229,9 @@ class OutboundMessageFragments {
         // no, this doesn't always work.
         // Also note that the iterator in getNextVolley may have alreay passed us,
         // or not reflect the addition.
-        if (_isWaiting || wasEmpty) {
+        if (added || size <= 0 || peer.getSendWindowBytesRemaining() >= size) {
             synchronized (_activePeers) {
-                _activePeers.notifyAll();
+                _activePeers.notify();
             }
         }
     }
@@ -285,9 +286,10 @@ class OutboundMessageFragments {
                     // if there is nothing left to send.
                     // Otherwise, return the volley to be sent.
                     // Otherwise, wait()
+                    long now = _context.clock().now();
                     while (_iterator.hasNext()) {
                         peer = _iterator.next();
-                        int remaining = peer.finishMessages();
+                        int remaining = peer.finishMessages(now);
                         if (remaining <= 0) {
                             // race with add()
                             _iterator.remove();
@@ -320,7 +322,6 @@ class OutboundMessageFragments {
                     // if we've gone all the way through the loop, wait
                     // ... unless nextSendDelay says we have more ready now
                     if (states == null && peersProcessed >= _activePeers.size() && nextSendDelay > 0) {
-                        _isWaiting = true;
                         peersProcessed = 0;
                         // why? we do this in the loop one at a time
                         //finishMessages();
@@ -340,7 +341,6 @@ class OutboundMessageFragments {
                                      _log.debug("Woken up while waiting");
                             }
                         }
-                        _isWaiting = false;
                     //} else {
                     //    if (_log.shouldLog(Log.DEBUG))
                     //        _log.debug("dont wait: alive=" + _alive + " state = " + state);
@@ -386,7 +386,7 @@ class OutboundMessageFragments {
         int piggybackedPartialACK = partialACKBitfields.size();
         // getCurrentFullACKs() already makes a copy, do we need to copy again?
         // YES because buildPacket() now removes them (maybe)
-        List<Long> remaining = new ArrayList<Long>(msgIds);
+        Set<Long> remaining = new HashSet<Long>(msgIds);
 
         // build the list of fragments to send
         List<Fragment> toSend = new ArrayList<Fragment>(8);

@@ -48,7 +48,9 @@ public class HostCheckHandler extends GzipHandler
                                  // our js is very small
                                  //"application/javascript", "application/x-javascript",
                                  "application/xhtml+xml", "application/xml",
-                                 "image/svg+xml", "text/css", "text/html", "text/plain"
+                                 // ditto svg
+                                 //"image/svg+xml",
+                                 "text/css", "text/html", "text/plain"
                                 );
         } else {
             // poorly documented, but we must put something in,
@@ -87,9 +89,9 @@ public class HostCheckHandler extends GzipHandler
             Log log = _context.logManager().getLog(HostCheckHandler.class);
             host = DataHelper.stripHTML(getHost(host));
             String s = "Console request denied.\n" +
-                       "    To allow access using the hostname \"" + host + "\", add the line \"" +
-                       RouterConsoleRunner.PROP_ALLOWED_HOSTS + '=' + host +
-                       "\" to advanced configuration and restart.";
+                       "    To allow access using the hostname \"" + host + "\",\n" +
+                       "    add the line \"" + RouterConsoleRunner.PROP_ALLOWED_HOSTS + '=' + host + "\"\n" +
+                       "    to advanced configuration and restart.";
             log.logAlways(Log.WARN, s);
             httpResponse.sendError(403, s);
             baseRequest.setHandled(true);

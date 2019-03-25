@@ -185,7 +185,7 @@ public class ConfigClientsHandler extends FormHandler {
                         _log.error("Error stopping plugin " + app,  e);
                     }
                 } else {
-                    WebAppStarter.stopWebApp(app);
+                    WebAppStarter.stopWebApp(_context, app);
                     addFormNotice(_t("Stopped webapp {0}", app));
                 }
             }
@@ -361,7 +361,7 @@ public class ConfigClientsHandler extends FormHandler {
             String app = name.substring(RouterConsoleRunner.PREFIX.length(), name.lastIndexOf(RouterConsoleRunner.ENABLED));
             Object val = _settings.get(app + ".enabled");
             if (! RouterConsoleRunner.ROUTERCONSOLE.equals(app))
-                props.setProperty(name, "" + (val != null));
+                props.setProperty(name, Boolean.toString(val != null));
         }
         RouterConsoleRunner.storeWebAppProperties(_context, props);
         addFormNotice(_t("WebApp configuration saved."));
@@ -375,7 +375,7 @@ public class ConfigClientsHandler extends FormHandler {
                 continue;
             String app = name.substring(PluginStarter.PREFIX.length(), name.lastIndexOf(PluginStarter.ENABLED));
             Object val = _settings.get(app + ".enabled");
-            props.setProperty(name, "" + (val != null));
+            props.setProperty(name, Boolean.toString(val != null));
         }
         PluginStarter.storePluginProperties(props);
         addFormNotice(_t("Plugin configuration saved."));
@@ -387,7 +387,7 @@ public class ConfigClientsHandler extends FormHandler {
      * requested and add the .war to that one
      */
     private void startWebApp(String app) {
-        ContextHandlerCollection s = WebAppStarter.getConsoleServer();
+        ContextHandlerCollection s = WebAppStarter.getConsoleServer(_context);
         if (s != null) {
                     try {
                         File path = new File(_context.getBaseDir(), "webapps");
@@ -577,7 +577,7 @@ public class ConfigClientsHandler extends FormHandler {
         boolean rv = !
             (proxyPort == ConfigUpdateHandler.DEFAULT_PROXY_PORT_INT &&
              proxyHost.equals(ConfigUpdateHandler.DEFAULT_PROXY_HOST) &&
-             _context.portMapper().getPort(PortMapper.SVC_HTTP_PROXY) < 0);
+             !_context.portMapper().isRegistered(PortMapper.SVC_HTTP_PROXY));
         if (!rv)
             addFormError(_t("HTTP client proxy tunnel must be running"));
         return rv;

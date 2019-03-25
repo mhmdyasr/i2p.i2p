@@ -34,13 +34,18 @@
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("Accept-Ranges", "none");
 
-%>
-<%@page pageEncoding="UTF-8"%>
-<%@ page contentType="text/html"%>
-<%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core"%>
+%><%@page pageEncoding="UTF-8" contentType="text/html" import="net.i2p.servlet.RequestWrapper"
+%><%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core"%>
 <jsp:useBean id="version" class="i2p.susi.dns.VersionBean" scope="application" />
 <jsp:useBean id="book" class="i2p.susi.dns.NamingServiceBean" scope="session" />
 <jsp:useBean id="intl" class="i2p.susi.dns.Messages" scope="application" />
+<%
+   String importMessages = null;
+   if (intl._t("Import").equals(request.getParameter("action"))) {
+       RequestWrapper wrequest = new RequestWrapper(request);
+       importMessages = book.importFile(wrequest);
+   }
+%>
 <jsp:setProperty name="book" property="*" />
 <jsp:setProperty name="book" property="resetDeletionMarks" value="1"/>
 <c:forEach items="${paramValues.checked}" var="checked">
@@ -62,10 +67,10 @@
 <hr>
 <div id="navi">
 <a id="overview" href="index"><%=intl._t("Overview")%></a>&nbsp;
-<a class="abook" href="addressbook?book=private&filter=none"><%=intl._t("Private")%></a>&nbsp;
-<a class="abook" href="addressbook?book=master&filter=none"><%=intl._t("Master")%></a>&nbsp;
-<a class="abook" href="addressbook?book=router&filter=none"><%=intl._t("Router")%></a>&nbsp;
-<a class="abook" href="addressbook?book=published&filter=none"><%=intl._t("Published")%></a>&nbsp;
+<a class="abook" href="addressbook?book=private&amp;filter=none"><%=intl._t("Private")%></a>&nbsp;
+<a class="abook" href="addressbook?book=master&amp;filter=none"><%=intl._t("Master")%></a>&nbsp;
+<a class="abook" href="addressbook?book=router&amp;filter=none"><%=intl._t("Router")%></a>&nbsp;
+<a class="abook" href="addressbook?book=published&amp;filter=none"><%=intl._t("Published")%></a>&nbsp;
 <a id="subs" href="subscriptions"><%=intl._t("Subscriptions")%></a>&nbsp;
 <a id="config" href="config"><%=intl._t("Configuration")%></a>
 </div>
@@ -75,7 +80,11 @@
 <h4><%=intl._t("Storage")%>: ${book.displayName}</h4>
 </div>
 
-<div id="messages">${book.messages}</div>
+<div id="messages">${book.messages}<%
+   if (importMessages != null) {
+       %><%=importMessages%><%
+   }
+%></div>
 
 ${book.loadBookMessages}
 
@@ -176,11 +185,21 @@ ${book.loadBookMessages}
 </c:if>
 
 </tr>
-
+<%
+    boolean haveImagegen = book.haveImagegen();
+%>
 <!-- limit iterator, or "Form too large" may result on submit, and is a huge web page if we don't -->
 <c:forEach items="${book.entries}" var="addr" begin="${book.resultBegin}" end="${book.resultEnd}">
 <tr class="list${book.trClass}">
-<td class="names"><a href="/imagegen/id?s=256&amp;c=${addr.b32}" target="_blank" title="<%=intl._t("View larger version of identicon for this hostname")%>"><img src="/imagegen/id?s=20&amp;c=${addr.b32}"></a><a href="http://${addr.name}/" target="_top">${addr.displayName}</a></td>
+<td class="names">
+<%
+    if (haveImagegen) {
+%>
+<a href="/imagegen/id?s=256&amp;c=${addr.b32}" target="_blank" title="<%=intl._t("View larger version of identicon for this hostname")%>"><img src="/imagegen/id?s=20&amp;c=${addr.b32}"></a>
+<%
+    }  // haveImagegen
+%>
+<a href="http://${addr.name}/" target="_top">${addr.displayName}</a></td>
 <td class="names"><span class="addrhlpr"><a href="http://${addr.b32}/" target="_blank" title="<%=intl._t("Base 32 address")%>">b32</a></span></td>
 <td class="helper"><a href="http://${addr.name}/?i2paddresshelper=${addr.destination}" target="_blank" title="<%=intl._t("Helper link to share host address with option to add to addressbook")%>">link</a></td>
 <td class="names"><span class="addrhlpr"><a href="details?h=${addr.name}&amp;book=${book.book}" title="<%=intl._t("More information on this entry")%>"><%=intl._t("details")%></a></span></td>
@@ -243,6 +262,28 @@ ${book.loadBookMessages}
 </p>
 </div>
 </form>
+
+<% if (!book.getBook().equals("published")) { %>
+<form method="POST" action="addressbook" enctype="multipart/form-data" accept-charset="UTF-8">
+<input type="hidden" name="book" value="${book.book}">
+<input type="hidden" name="serial" value="<%=susiNonce%>">
+<input type="hidden" name="begin" value="0">
+<input type="hidden" name="end" value="49">
+<div id="import">
+<h3><%=intl._t("Import from hosts.txt file")%></h3>
+<table>
+<tr>
+<td><b><%=intl._t("File")%></b></td>
+<td><input name="file" type="file" accept=".txt" value="" /></td>
+</tr>
+</table>
+<p class="buttons">
+<input class="cancel" type="reset" value="<%=intl._t("Cancel")%>" >
+<input class="download" type="submit" name="action" value="<%=intl._t("Import")%>" >
+</p>
+</div>
+</form>
+<% } %>
 
 <div id="footer">
 <hr>

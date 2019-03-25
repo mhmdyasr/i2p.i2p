@@ -7,6 +7,9 @@
      -->
     <property file="override.properties"/>
     <property file="build.properties"/>
+    <!--  When changing, also change javadoc URL in build.properties, and checksum in apps/jetty/build.xml -->
+    <property name="jetty.ver" value="9.2.25.v20180606" />
+    <property name="tomcat.ver" value="8.5.38" />
 
     <!-- You probably don't want to change anything from here down -->
     <target name="help" depends="all" />
@@ -21,6 +24,9 @@
         <echo message="  installer-osx: build the GUI installer (OSX only)" />
         <echo message="  installer-windows: build the GUI installer (Windows only)" />
         <echo message="  installer-nowindows: build the GUI installer (all but Windows)" />
+        <echo message="  installer5, installer5-linux, installer5-nowindows, installer5-windows: use IzPack 5" />
+        <echo message="  osxLauncher: build the Mac OS X router/GUI launcher (OSX only)" />
+        <echo message="  bbLauncher: build the Browser Bundle router launcher" />
         <echo message="  tarball:   tar the full install into i2p.tar.bz2 (extracts to build a new clean install)" />
         <echo message="  updater:   Package the built files in i2pupdate.zip (extracts safely over existing installs)" />
         <echo message="  updater200: Updater compressed with pack200 (creates i2pupdate200.zip, 60% smaller)" />
@@ -32,8 +38,7 @@
         <echo message="  updater200WithJavadocAndJetty: updater including the javadocs, for display in the console, and Jetty (creates i2pupdate200.zip)" />
         <echo message="  signed-updater200WithJavadocAndJetty: Signed updater including the javadocs, for display in the console, and Jetty (creates i2pupdate.su3)" />
         <echo message="  updaterWithJetty: Updater including Jetty" />
-        <echo message="  updater200withJetty: Updater including Jetty" />
-        <echo message="  updater200withJetty: Updater including Jetty" />
+        <echo message="  updater200WithJetty: Updater including Jetty" />
         <echo message="  signed-updater200withJetty: Signed updater including Jetty" />
         <echo message="  updaterWithJettyFixes: updater including local jetty patches" />
         <echo message="  updaterWithGeoIP: updater including GeoIP Files" />
@@ -71,11 +76,11 @@
             <echo message="The following command will install the build dependencies for you:" />
             <echo message=" " />
             <echo message="sudo apt-get install debhelper ant debconf default-jdk gettext libgmp-dev po-debconf fakeroot \" />
-            <echo message="  build-essential quilt dh-apparmor dh-systemd libservice-wrapper-java \"  />
+            <echo message="  build-essential quilt dh-apparmor dh-systemd libservice-wrapper-java libjson-simple-java \"  />
             <echo message="  devscripts libjetty9-java libtomcat8-java libtaglibs-standard-jstlel-java libgetopt-java"  />
             <echo message=" " />
             <echo message="The following command will install the additional runtime dependencies:" />
-            <echo message="sudo apt-get install libecj-java geoip-database" />
+            <echo message="sudo apt-get install geoip-database famfamfam-flag-png" />
             <echo message=" " />
             <echo message="Once the dependencies are installed, run &quot;ant debian&quot;"/>
             <echo message="to patch the source and build the packages." />
@@ -281,7 +286,7 @@
     <target name="buildSmall" depends="builddepSmall, jarSmall, buildWEB" />
     <target name="buildclean" depends="distclean, build" />
 
-    <target name="builddep" depends="builddepSmall, buildBOB, buildSAM, buildSusiMail, buildSusiDNS, buildI2PSnark" />
+    <target name="builddep" depends="builddepSmall, buildBOB, buildSAM, buildSusiMail, buildSusiDNS, buildI2PSnark, buildI2PControl" />
 
     <target name="builddepSmall" depends="buildrouter, buildSystray, buildDesktopGui, buildRouterConsole, buildStreaming, buildI2PTunnel, buildAddressbook" />
 
@@ -296,6 +301,28 @@
               property = project.setProperty("epoch",Math.floor((new Date()).getTime()/1000));
             ]]>
         </script>
+    </target>
+
+    <target name="bbLauncher" depends="build">
+        <sequential>
+            <exec executable="./sbt" dir="launchers" failonerror="true">
+                <arg value="browserbundle:clean" />
+            </exec>
+            <exec executable="./sbt" dir="launchers" failonerror="true">
+                <arg value="browserbundle:assembly" />
+            </exec>
+        </sequential>
+    </target>
+
+    <target name="osxLauncher" depends="build,preppkg-osx">
+        <sequential>
+            <exec executable="./sbt" dir="launchers" failonerror="true">
+                <arg value="macosx:cleanAllTask" />
+            </exec>
+            <exec executable="./sbt" dir="launchers" failonerror="true">
+                <arg value="macosx:buildAppBundleTask" />
+            </exec>
+        </sequential>
     </target>
 
     <target name="buildBOB" depends="buildStreaming" >
@@ -327,6 +354,11 @@
     <target name="buildImagegen" depends="buildCore, buildJetty" >
         <ant dir="apps/imagegen" target="build" />
         <copy file="apps/imagegen/imagegen/build/imagegen.war" todir="build/" />
+    </target>
+
+    <target name="buildI2PControl" depends="buildRouter, buildJetty" >
+        <ant dir="apps/i2pcontrol" target="war" />
+        <copy file="apps/i2pcontrol/build/jsonrpc.war" todir="build/" />
     </target>
 
     <target name="buildI2PSnark" depends="buildStreaming, buildJetty, buildSystray" >
@@ -361,10 +393,7 @@
         <copy file="apps/i2ptunnel/java/build/i2ptunnel.war" todir="build/" />
     </target>
 
-    <target name="buildDesktopGui" depends="buildCore, buildrouter" >
-<!--
-        <ant dir="apps/desktopgui" target="clean" />
--->
+    <target name="buildDesktopGui" depends="buildCore, buildrouter, buildSystray" >
         <ant dir="apps/desktopgui" target="jar" />
         <copy file="apps/desktopgui/dist/desktopgui.jar" todir="build/" />
     </target>
@@ -416,14 +445,26 @@
         <copy file="apps/jrobin/java/build/jrobin.jar" todir="build/" />
     </target>
 
-    <target name="buildProperties" depends="getMtnRev, getReleaseNumber, getBuildNumber" >
+    <target name="buildProperties" depends="getMtnRev, getReleaseNumber, getBuildNumber, setBuildTimestamp, disableManifestClasspath" >
         <!-- default if not set above -->
         <property name="workspace.version" value="unknown" />
+        <!-- default if not set by setBuildTimestamp -->
+        <property name="build.timestamp" value="reproducible" />
+        <!-- default if not set by disableManifestClasspath -->
+        <property name="manifest.classpath.name" value="Class-Path" />
+        <property name="full.version" value="${release.number}-${i2p.build.number}${build.extra}" />
+        <echo message="Building version ${full.version} (mtn rev ${workspace.version})" />
+    </target>
+
+    <target name="setBuildTimestamp" unless="${build.reproducible}" >
         <tstamp>
             <format property="build.timestamp" pattern="yyyy-MM-dd HH:mm:ss z" timezone="UTC" locale="en" />
         </tstamp>
-        <property name="full.version" value="${release.number}-${i2p.build.number}${build.extra}" />
-        <echo message="Building version ${full.version} (mtn rev ${workspace.version})" />
+    </target>
+
+    <!-- Disable Class-Path in jar manifests by renaming it (Fedora) -->
+    <target name="disableManifestClasspath" if="${without-manifest-classpath}" >
+        <property name="manifest.classpath.name" value="Disabled-Class-Path" />
     </target>
 
     <target name="buildWEB" depends="buildRouterConsole" >
@@ -508,6 +549,33 @@
             match='(^\s+public\s+final\s+static\s+long\s+BUILD\s+=\s+)[0-9]+;' replace='\1${new.i2p.build.number};'/>
     </target>
 
+    <target name="revisions" depends="getReleaseNumber, getBuildNumber">
+        <!-- mtn log __brief __no-graph __to t:i2p-0.9.xx | cut -d ' ' -f 2 | sort | uniq -c | sort -rn -->
+        <exec executable="mtn" outputproperty="getrevisions1" errorproperty="reverror1" failifexecutionfails="true" >
+            <arg value="log" />
+            <arg value="--brief" />
+            <arg value="--no-graph" />
+            <arg value="--to" />
+            <arg value="t:i2p-${release.number}" />
+        </exec>
+        <exec executable="cut" inputstring="${getrevisions1}" outputproperty="getrevisions2" failifexecutionfails="true" >
+            <arg value="-d" />
+            <arg value=" " />
+            <arg value="-f" />
+            <arg value="2" />
+        </exec>
+        <exec executable="sort" inputstring="${getrevisions2}" outputproperty="getrevisions3" failifexecutionfails="true" >
+        </exec>
+        <exec executable="uniq" inputstring="${getrevisions3}" outputproperty="getrevisions4" failifexecutionfails="true" >
+            <arg value="-c" />
+        </exec>
+        <exec executable="sort" inputstring="${getrevisions4}" outputproperty="getrevisions5" failifexecutionfails="true" >
+            <arg value="-rn" />
+        </exec>
+        <echo message="Revisions since ${release.number}:" />
+        <echo message="${getrevisions5}" />
+    </target>
+
     <!-- end monotone targets -->
 
     <!-- launch4j targets -->
@@ -538,7 +606,7 @@
         <jar destfile="./build/launchi2p.jar">
             <manifest>
                 <attribute name="Main-Class" value="net.i2p.router.RouterLaunch" />
-                <attribute name="Class-Path" value="lib/i2p.jar lib/router.jar lib/jbigi.jar lib/BOB.jar lib/sam.jar lib/mstreaming.jar lib/streaming.jar lib/routerconsole.jar lib/i2ptunnel.jar lib/org.mortbay.jetty.jar lib/javax.servlet.jar lib/jasper-runtime.jar lib/commons-logging.jar lib/commons-el.jar lib/wrapper.jar lib/systray.jar lib/desktopgui.jar lib/i2psnark.jar lib/jrobin.jar lib/jstl.jar lib/standard.jar lib/jetty-continuation.jar lib/jetty-deploy.jar lib/jetty-http.jar lib/jetty-i2p.jar lib/jetty-io.jar lib/jetty-rewrite-handler.jar lib/jetty-security.jar lib/jetty-servlet.jar lib/jetty-servlets.jar lib/jetty-start.jar lib/jetty-util.jar lib/jetty-webapp.jar lib/jetty-xml.jar" />
+                <attribute name="Class-Path" value="lib/i2p.jar lib/router.jar lib/jbigi.jar lib/BOB.jar lib/sam.jar lib/mstreaming.jar lib/streaming.jar lib/routerconsole.jar lib/i2ptunnel.jar lib/org.mortbay.jetty.jar lib/javax.servlet.jar lib/jasper-runtime.jar lib/commons-el.jar lib/wrapper.jar lib/systray.jar lib/desktopgui.jar lib/i2psnark.jar lib/jrobin.jar lib/jstl.jar lib/standard.jar lib/jetty-continuation.jar lib/jetty-deploy.jar lib/jetty-http.jar lib/jetty-i2p.jar lib/jetty-io.jar lib/jetty-rewrite-handler.jar lib/jetty-security.jar lib/jetty-servlet.jar lib/jetty-servlets.jar lib/jetty-start.jar lib/jetty-util.jar lib/jetty-webapp.jar lib/jetty-xml.jar" />
                 <attribute name="Built-By" value="${build.built-by}" />
                 <attribute name="Build-Date" value="${build.timestamp}" />
                 <attribute name="Base-Revision" value="${workspace.version}" />
@@ -751,22 +819,25 @@
         <mkdir dir="./build" />
         <mkdir dir="./build/javadoc" />
         <javadoc access="package"
+            source="${javac.version}"
             destdir="./build/javadoc"
             packagenames="*"
             use="true"
             splitindex="true"
             failonerror="true"
+            additionalparam="-notimestamp"
             doctitle="I2P Javadocs for Release ${release.number} Build ${i2p.build.number}${build.extra}"
             windowtitle="I2P Anonymous Network - Java Documentation - Version ${release.number}">
-            <group title="Core SDK (i2p.jar)" packages="net.i2p:net.i2p.*:net.i2p.client:net.i2p.client.*:net.i2p.internal:net.i2p.internal.*:freenet.support.CPUInformation:org.bouncycastle.oldcrypto:org.bouncycastle.oldcrypto.*:gnu.crypto.*:gnu.getopt:gnu.gettext:com.nettgryppa.security:org.apache.http.conn.ssl:org.apache.http.conn.util:org.apache.http.util" />
+            <group title="Core SDK (i2p.jar)" packages="net.i2p:net.i2p.*:net.i2p.client:net.i2p.client.*:net.i2p.internal:net.i2p.internal.*:freenet.support.CPUInformation:org.bouncycastle.oldcrypto:org.bouncycastle.oldcrypto.*:gnu.crypto.*:gnu.getopt:gnu.gettext:com.nettgryppa.security:org.apache.http.conn.ssl:org.apache.http.conn.util:org.apache.http.util:org.json.simple:org.json.simple.*:com.southernstorm.noise.crypto.x25519:com.southernstorm.noise.crypto.chacha20" />
             <group title="Streaming Library" packages="net.i2p.client.streaming:net.i2p.client.streaming.impl" />
-            <group title="Router" packages="net.i2p.router:net.i2p.router.*:net.i2p.data.i2np:net.i2p.data.router:org.cybergarage:org.cybergarage.*:org.freenetproject:org.xlattice.crypto.filters:com.maxmind.geoip" />
-            <group title="Router Console" packages="net.i2p.router.web:net.i2p.router.web.*:net.i2p.router.update:net.i2p.router.news" />
+            <group title="Router" packages="net.i2p.router:net.i2p.router.*:net.i2p.data.i2np:net.i2p.data.router:org.cybergarage:org.cybergarage.*:org.freenetproject:org.xlattice.crypto.filters:com.maxmind.*:com.southernstorm.noise.*" />
+            <group title="Router Console" packages="net.i2p.router.web:net.i2p.router.web.*:net.i2p.router.update:net.i2p.router.sybil:edu.internet2.ndt:net.i2p.router.news:com.vuze.*" />
             <!-- apps and bridges starting here, alphabetical please -->
             <group title="Addressbook Application" packages="net.i2p.addressbook:net.i2p.router.naming:net.metanotion:net.metanotion.*" />
             <group title="BOB Bridge" packages="net.i2p.BOB" />
             <group title="BOB Demos" packages="net.i2p.BOB.Demos.echo.echoclient:net.i2p.BOB.Demos.echo.echoserver" />
             <group title="Desktopgui Application" packages="net.i2p.desktopgui:net.i2p.desktopgui.*" />
+            <group title="I2PControl Application" packages="net.i2p.i2pcontrol:net.i2p.i2pcontrol.*:org.mindrot.jbcrypt:com.thetransactioncompany.jsonrpc2:com.thetransactioncompany.jsonrpc2.*" />
             <group title="I2PSnark Application" packages="org.klomp.snark:org.klomp.snark.*" />
             <group title="I2PTunnel Application" packages="net.i2p.i2ptunnel:net.i2p.i2ptunnel.*" />
             <group title="Imagegen Application" packages="com.docuverse.identicon:com.google.zxing:com.google.zxing.*:net.i2p.imagegen" />
@@ -802,23 +873,27 @@
                 <pathelement location="apps/imagegen/zxing/javase/src/main/java" />
                 <pathelement location="apps/jrobin/java/src" />
                 <pathelement location="installer/java/src" />
+                <pathelement location="apps/i2pcontrol/java" />
             </sourcepath>
             <classpath>
+                <!-- warning, some entries are needed for Debian builds only -->
                 <pathelement location="apps/jetty/jettylib/org.mortbay.jetty.jar" />
                 <pathelement location="apps/jetty/jettylib/jasper-runtime.jar" />
                 <pathelement location="apps/jetty/jettylib/javax.servlet.jar" />
                 <pathelement location="apps/jetty/jettylib/jetty-http.jar" />
                 <pathelement location="apps/jetty/jettylib/jetty-security.jar" />
                 <pathelement location="apps/jetty/jettylib/jetty-servlet.jar" />
+                <pathelement location="apps/jetty/jettylib/jetty-servlets.jar" />
                 <pathelement location="apps/jetty/jettylib/jetty-start.jar" />
                 <pathelement location="apps/jetty/jettylib/jetty-util.jar" />
                 <pathelement location="apps/jetty/jettylib/jetty-webapp.jar" />
                 <pathelement location="apps/jetty/jettylib/jetty-xml.jar" />
-                <pathelement location="apps/jrobin/jrobin-1.5.9.1.jar" />
+                <pathelement location="apps/jetty/jettylib/tomcat-api.jar" />
                 <pathelement location="installer/lib/wrapper/all/wrapper.jar" />
                 <!-- following are only for debian builds -->
                 <pathelement location="core/java/build/libintl.jar" />
                 <pathelement location="core/java/build/gnu-getopt.jar" />
+                <pathelement location="core/java/build/json-simple.jar" />
             </classpath>
             <!-- These variables are stored in build.properties.
                   End-users can override by creating the file override.properties -->
@@ -827,7 +902,6 @@
             <link offline="true" href="${jettydocs.url}" packagelistLoc="installer/resources/package-lists/jetty/" />
             <link offline="true" href="${wrapperdocs.url}" packagelistLoc="installer/resources/package-lists/wrapper/" />
         </javadoc>
-        <echo message="Warning, javadoc embeds timestamps in the output, run with 'TZ=UTC ant javadoc' if you plan to distribute" />
     </target>
 
     <target name="javadoc-zip" depends="javadoc">
@@ -1062,7 +1136,7 @@
 	    <!--
 	    	Less common, but they pollute my workspace here, so we
             	might as well nuke these as well. Are there any others?
-            	
+
             	!!??? Why don't we just nuke "**/*~" ???!!
 
             	++Sponge
@@ -1226,7 +1300,7 @@
     </target>
 
     <!-- see targets below for conditional copying -->
-    <target name="preppkg-base" depends="build, preplicenses, prepConsoleDocs, prepthemeupdates, prepCertificates, prepRouterInfos, copyjetty, copytomcat-unlesspkg, copyjstl-unlesspkg, copystandard-unlesspkg, truncatehistory">
+    <target name="preppkg-base" depends="build, preplicenses, prepConsoleDocs, prepthemeupdates, prepCertificates, prepRouterInfos, copyjetty, copytomcat-unlesspkg, copyjstl-unlesspkg, copystandard-unlesspkg, copyflags-unlesspkg, truncatehistory">
         <!-- if updater200 was run previously, it left *.pack files in pkg-temp -->
         <!-- Also remove deletelist.txt used for updater only -->
         <delete>
@@ -1251,12 +1325,12 @@
         <copy file="build/susimail.war" todir="pkg-temp/webapps/" />
         <copy file="build/susidns.war" todir="pkg-temp/webapps/" />
         <copy file="build/imagegen.war" todir="pkg-temp/webapps/" />
+        <copy file="build/jsonrpc.war" todir="pkg-temp/webapps/" />
         <copy file="build/i2psnark.war" todir="pkg-temp/webapps/" />
         <copy file="apps/i2psnark/i2psnark.config" todir="pkg-temp/" />
         <copy file="installer/resources/blocklist.txt" todir="pkg-temp/" />
         <copy file="installer/resources/clients.config" todir="pkg-temp/" />
         <copy file="installer/resources/i2ptunnel.config" todir="pkg-temp/" />
-        <copy file="installer/resources/systray.config" todir="pkg-temp/" />
         <copy file="installer/resources/wrapper.config" todir="pkg-temp/" />
         <copy file="installer/resources/hosts.txt" todir="pkg-temp/" />
         <copy file="INSTALL-headless.txt" todir="pkg-temp/" />
@@ -1272,15 +1346,16 @@
         <copy todir="pkg-temp/eepsite/" >
             <fileset dir="installer/resources/eepsite/" excludes="**/.placeholder" />
         </copy>
-        <copy todir="pkg-temp/eepsite/docroot/help/lib/" >
-            <fileset dir="installer/resources/icons/flags/" includes="cn.png de.png es.png fr.png ir.png it.png jp.png nl.png ru.png se.png us.png" />
-        </copy>
         <copy file="installer/resources/themes/console/images/favicon.ico" tofile="pkg-temp/eepsite/docroot/favicon.ico" />
-        <copy todir="pkg-temp/docs/icons/flags" >
-          <fileset dir="installer/resources/icons/flags" />
+    </target>
+
+    <target name="copyflags-unlesspkg" unless="${with-famfamfam-flag-png}" >
+        <copy todir="pkg-temp/eepsite/docroot/help/lib/" >
+            <fileset dir="installer/resources/icons/flags/" includes="az.png cn.png de.png es.png fr.png ir.png it.png jp.png nl.png pl.png pt.png ru.png se.png tr.png us.png" />
         </copy>
-        <copy todir="pkg-temp/docs/icons/flags48x48" >
-          <fileset dir="installer/resources/icons/flags48x48" />
+        <copy todir="pkg-temp/docs/icons/flags" >
+          <!-- base flags/ dir only. flags16x11/ and flags48x48/ dirs already copied by prepConsoleDocs target -->
+          <fileset dir="installer/resources/icons/flags" />
         </copy>
     </target>
 
@@ -1300,6 +1375,7 @@
                 <istrue value="${with-libtomcat6-java}" />
                 <istrue value="${with-libtomcat7-java}" />
                 <istrue value="${with-libtomcat8-java}" />
+                <istrue value="${with-libtomcat9-java}" />
             </or>
         </condition>
     </target>
@@ -1347,7 +1423,7 @@
     </target>
 
     <target name="preplicenses-unlesspkg" depends="settomcatprop" unless="${with-libtomcat-java}" >
-        <copy file="apps/jetty/apache-tomcat-8.5.23/NOTICE" tofile="pkg-temp/licenses/NOTICE-Tomcat.txt" />
+        <copy file="apps/jetty/apache-tomcat-${tomcat.ver}/NOTICE" tofile="pkg-temp/licenses/NOTICE-Tomcat.txt" />
     </target>
 
     <!-- DOES include launch4j licenses for Windows builds -->
@@ -1372,10 +1448,17 @@
     </target>
 
     <!-- SSL Certs -->
-    <target name="prepCertificates">
+    <target name="prepCertificates" depends="buildCore">
         <copy todir="pkg-temp/certificates/" >
           <fileset dir="installer/resources/certificates/" />
         </copy>
+        <java classname="net.i2p.crypto.CertUtil" fork="true" failonerror="true">
+            <classpath>
+                <pathelement location="build/i2p.jar" />
+            </classpath>
+            <arg value="checkall" />
+            <arg value="pkg-temp/certificates" />
+        </java>
     </target>
 
     <condition property="no.bundle.routerInfos">
@@ -1443,10 +1526,14 @@
         <copy todir="pkg-temp/docs/" >
           <fileset dir="installer/resources/readme/" includes="readme*.html" />
           <fileset dir="installer/resources/proxy/" includes="*.ht" />
-          <!-- lang_ar.png added in 0.8.4; a1,a2,je, and eu.png added in 0.8.9; gg.png added in 0.8.10;
-               im.png added in 0.8.12; cw.png added in 0.9.5; ap,bl,bq,ss,sx added in 0.9.21;
-               lang_gl added in 0.9.28; a0.png added in 0.9.31 -->
-          <fileset dir="installer/resources/" includes="icons/flags/lang_ar.png icons/flags/gg.png icons/flags/je.png icons/flags/eu.png icons/flags/im.png icons/flags/a1.png icons/flags/a2.png icons/flags/cw.png icons/flags/ap.png icons/flags/bl.png icons/flags/bq.png icons/flags/ss.png icons/flags/sx.png icons/flags/lang_gl.png icons/flags/a0.png" />
+          <!--
+               As of 0.9.36:
+               All new and changed flags must go in the flags16x11/ dir,
+               which will be checked first by flags.jsp.
+               The flags/ dir is the original set from famfamfam,
+               which may be symlinked in package installs.
+           -->
+          <fileset dir="installer/resources/" includes="icons/flags16x11/*" />
           <!-- flags48x48 added in 0.9.32 -->
           <fileset dir="installer/resources/" includes="icons/flags48x48/*" />
         </copy>
@@ -1574,6 +1661,7 @@
         <copy file="build/susimail.war" todir="pkg-temp/webapps/" />
         <copy file="build/susidns.war" todir="pkg-temp/webapps/" />
         <copy file="build/imagegen.war" todir="pkg-temp/webapps/" />
+        <copy file="build/jsonrpc.war" todir="pkg-temp/webapps/" />
         <!-- as of 0.7.12; last changed in 0.9; removed from update in 0.9.26 -->
       <!--
         <copy file="apps/susidns/src/lib/jstl.jar" todir="pkg-temp/lib/" />
@@ -1612,8 +1700,6 @@
         <copy file="build/addressbook.war" todir="pkg-temp/webapps/" />
         <!-- decapitalized the file in 0.7.8 -->
         <copy file="installer/resources/countries.txt" todir="pkg-temp/geoip/" />
-        <!-- small enough to include for now -->
-        <copy file="installer/resources/geoipv6.dat.gz" todir="pkg-temp/geoip/" />
         <copy file="installer/resources/continents.txt" todir="pkg-temp/geoip/" />
       <!--
         <copy file="installer/resources/public-suffix-list.txt" todir="pkg-temp/geoip/" />
@@ -1642,8 +1728,12 @@
     <!-- GeoIP files, set withGeoIPDatabase=true in override.properties to prevent -->
     <!-- As of 0.9.26, the files are not included in Debian/Ubuntu builds. -->
     <target name="prepgeoupdate-unlesspkg" unless="${with-geoip-database}" >
+        <mkdir dir="pkg-temp/geoip" />
+      <!--
         <copy file="installer/resources/geoip.txt" todir="pkg-temp/geoip/" />
         <copy file="installer/resources/geoipv6.dat.gz" todir="pkg-temp/geoip/" />
+       -->
+        <gunzip src="installer/resources/GeoLite2-Country.mmdb.gz" dest="pkg-temp/geoip/GeoLite2-Country.mmdb" />
     </target>
 
     <!-- All jetty jars required for update.
@@ -1696,18 +1786,36 @@
         <ant dir="installer/java" target="build" />
     </target>
 
+    <!-- IzPack 4 -->
     <target name="installer" depends="preppkg, buildProperties, util-list-changes, izpack-patches, buildUtilityJar" >
-        <!--
-          Force 1.5 pack200 output
-          Doesnt work!
-          http://jira.codehaus.org/browse/IZPACK-404
-          http://forums.sun.com/thread.jspa?threadID=773439
-          http://bfo.co.uk/blog/2010/05/13/combining_ant_jar_signatures_and_pack200.html
-        <property name="com.sun.java.util.jar.pack.package.majver" value="150" />
-        <property name="com.sun.java.util.jar.pack.package.minver" value="7" />
-        -->
         <izpack input="${basedir}/installer/install.xml" output="${basedir}/install.jar" installerType="standard" basedir="${basedir}" />
+        <ant target="installerexe" />
+    </target>
 
+    <!-- IzPack 5 -->
+    <target name="ensureIzpack5" >
+        <!-- set if unset -->
+        <property name="izpack5.home" value="${user.home}/IzPack" />
+        <condition property="izpack5.available" >
+            <available file="${izpack5.home}" type="dir" />
+        </condition>
+        <fail message="Error - IzPack 5.1.x must be installed at ${izpack5.home}, or set izpack5.home=/PATH/TO/IzPack in override.properties, or download from http://izpack.org/downloads/ and install" >
+            <condition>
+                <not>
+                    <isset property="izpack5.available" />
+                </not>
+            </condition>
+        </fail>
+        <path id="izpack5.lib.path">
+            <fileset dir="${izpack5.home}/lib" includes="*.jar"/>
+        </path>
+        <taskdef name="izpack5"
+                 classpathref="izpack5.lib.path"
+                 classname="com.izforge.izpack.ant.IzPackTask" />
+    </target>
+
+    <target name="installer5" depends="ensureIzpack5, preppkg, buildProperties, util-list-changes, buildUtilityJar" >
+        <izpack5 input="${basedir}/installer/install5.xml" output="${basedir}/install.jar" installerType="standard" basedir="${basedir}" />
         <ant target="installerexe" />
     </target>
 
@@ -1720,9 +1828,16 @@
     </target>
 
     <!-- Custom installers -->
+    <!-- IzPack 4 -->
     <target name="installer-nowindows" depends="clean, preppkg-nowindows, izpack-patches" >
         <fixcrlf srcdir="pkg-temp" includes="*.config **/*.xml **/*.properties **/*.txt scripts/*" encoding="utf8" eol="lf" />
         <izpack input="${basedir}/installer/install.xml" output="${basedir}/i2pinstall_${full.version}.jar" installerType="standard" basedir="${basedir}" />
+    </target>
+
+    <!-- IzPack 5 -->
+    <target name="installer5-nowindows" depends="ensureIzpack5, clean, preppkg-nowindows" >
+        <fixcrlf srcdir="pkg-temp" includes="*.config **/*.xml **/*.properties **/*.txt scripts/*" encoding="utf8" eol="lf" />
+        <izpack5 input="${basedir}/installer/install5.xml" output="${basedir}/i2pinstall_${full.version}.jar" installerType="standard" basedir="${basedir}" />
     </target>
 
 
@@ -1731,9 +1846,16 @@
         <izpack input="${basedir}/installer/install.xml" output="${basedir}/i2pinstall_${full.version}_freebsd-only.jar" installerType="standard" basedir="${basedir}" />
     </target>
 
+    <!-- IzPack 4 -->
     <target name="installer-linux" depends="clean, preppkg-linux-only, izpack-patches" >
         <fixcrlf srcdir="pkg-temp" includes="*.config **/*.xml **/*.properties **/*.txt scripts/*" encoding="utf8" eol="lf" />
         <izpack input="${basedir}/installer/install.xml" output="${basedir}/i2pinstall_${full.version}_linux-only.jar" installerType="standard" basedir="${basedir}" />
+    </target>
+
+    <!-- IzPack 5 -->
+    <target name="installer5-linux" depends="ensureIzpack5, clean, preppkg-linux-only" >
+        <fixcrlf srcdir="pkg-temp" includes="*.config **/*.xml **/*.properties **/*.txt scripts/*" encoding="utf8" eol="lf" />
+        <izpack5 input="${basedir}/installer/install5.xml" output="${basedir}/i2pinstall_${full.version}_linux-only.jar" installerType="standard" basedir="${basedir}" />
     </target>
 
 
@@ -1779,9 +1901,19 @@
         <delete dir="pkg-temp" includes="eepget i2prouter INSTALL-headless.txt osid postinstall.sh runplain.sh" />
     </target>
 
+    <!-- IzPack 4 -->
     <target name="installer-windows" depends="clean, preppkg-windows-only, util-list-changes, izpack-patches, buildUtilityJar" >
         <fixcrlf srcdir="pkg-temp" includes="*.config *.bat *.cmd **/*.xml **/*.properties **/*.txt scripts/*" encoding="utf8" eol="crlf"/>
         <izpack input="${basedir}/installer/install.xml" output="${basedir}/install.jar" installerType="standard" basedir="${basedir}" />
+        <ant target="installerexe" />
+        <delete file="${basedir}/install.jar" />
+        <move file="${basedir}/i2pinstall.exe" tofile="${basedir}/i2pinstall_${full.version}_windows.exe" />
+    </target>
+
+    <!-- IzPack 5 -->
+    <target name="installer5-windows" depends="ensureIzpack5, clean, preppkg-windows-only, util-list-changes, buildUtilityJar" >
+        <fixcrlf srcdir="pkg-temp" includes="*.config *.bat *.cmd **/*.xml **/*.properties **/*.txt scripts/*" encoding="utf8" eol="crlf"/>
+        <izpack5 input="${basedir}/installer/install5.xml" output="${basedir}/install.jar" installerType="standard" basedir="${basedir}" />
         <ant target="installerexe" />
         <delete file="${basedir}/install.jar" />
         <move file="${basedir}/i2pinstall.exe" tofile="${basedir}/i2pinstall_${full.version}_windows.exe" />
@@ -1951,6 +2083,8 @@
 
     <target name="findbugs" depends="build2, buildUtilityJar">
         <echo message="Starting findbugs, this will take a while..." />
+        <!-- ref: https://github.com/spotbugs/spotbugs/issues/148 -->
+        <echo message="If this doesn't work with Java 9+. try Java 8" />
         <exec executable="nice" failonerror="true">
             <arg value="findbugs"/>
             <arg value="-textui"/>
@@ -1961,7 +2095,7 @@
             <arg value="-output"/>
             <arg value="i2p.fba"/>
             <arg value="-auxclasspath"/>
-            <arg value="build/commons-el.jar:build/commons-logging.jar:build/jasper-runtime.jar:build/javax.servlet.jar:build/org.mortbay.jetty.jar:apps/jrobin/jrobin-1.5.9.1.jar:installer/lib/wrapper/all/wrapper.jar:apps/susidns/src/lib/standard.jar:apps/susidns/src/lib/jstl.jar:apps/jrobin/jrobin-1.5.9.1.jar"/>
+            <arg value="build/commons-el.jar:build/jasper-runtime.jar:build/javax.servlet.jar:build/org.mortbay.jetty.jar:build/jrobin.jar:installer/lib/wrapper/all/wrapper.jar:apps/susidns/src/lib/standard.jar:apps/susidns/src/lib/jstl.jar"/>
             <arg value="-sourcepath"/>
             <arg value="apps/BOB/src/:apps/addressbook/java/src/:apps/i2psnark/java/src/:apps/i2ptunnel/java/src/:apps/ministreaming/java/src/:apps/routerconsole/java/src/:apps/sam/java/src/:apps/streaming/java/src/:apps/susidns/src/java/src/:apps/susimail/src/src/:apps/systray/java/src/:core/java/src/:router/java/src/:installer/java/src"/>
             <!-- start of the files to be analyzed -->
@@ -1974,6 +2108,7 @@
             <arg value="build/i2ptunnel.war"/>
             <arg value="build/imagegen.war"/>
             <arg value="build/jetty-i2p.jar"/>
+            <arg value="build/jsonrpc.war"/>
             <arg value="build/mstreaming.jar"/>
             <arg value="build/router.jar/"/>
             <arg value="build/desktopgui.jar"/>
@@ -2243,6 +2378,40 @@
     </target>
 
     <target name="debian" depends="debian-clean, debchange, debian-binary" />
+    <target name="precise" depends="copy-precise, debian" />
+    <target name="wheezy" depends="precise" />
+    <target name="trusty" depends="copy-trusty, debian" />
+    <target name="jessie" depends="trusty" />
+    <target name="xenial" depends="copy-xenial, debian" />
+    <target name="bionic" depends="copy-bionic, debian" />
+    <target name="disco" depends="copy-disco, debian" />
+    <target name="buster" depends="disco" />
+
+    <target name="copy-precise">
+        <copy todir="debian" overwrite="true">
+            <fileset dir="debian-alt/precise/" />
+        </copy>
+    </target>
+    <target name="copy-trusty">
+        <copy todir="debian" overwrite="true">
+            <fileset dir="debian-alt/trusty/" />
+        </copy>
+    </target>
+    <target name="copy-xenial">
+        <copy todir="debian" overwrite="true">
+            <fileset dir="debian-alt/xenial/" />
+        </copy>
+    </target>
+    <target name="copy-bionic">
+        <copy todir="debian" overwrite="true">
+            <fileset dir="debian-alt/bionic/" />
+        </copy>
+    </target>
+    <target name="copy-disco">
+        <copy todir="debian" overwrite="true">
+            <fileset dir="debian-alt/disco/" />
+        </copy>
+    </target>
 
     <target name="getExtendedVersion" depends="buildProperties, trimMtnRev">
         <property name="MtnShortHash" value="unknown" />
@@ -2310,7 +2479,14 @@
         </exec>
         <delete includeemptydirs="true" quiet="false" failonerror="false">
             <fileset dir="../i2p-${Extended.Version}/debian-alt/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/" includes="*.xml" />
+            <fileset dir="../i2p-${Extended.Version}/installer/c/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/doc/" />
             <fileset dir="../i2p-${Extended.Version}/installer/lib/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources" includes="checklist.md deletelist.txt install_* geoipv6-extras.csv makegeoip* po4a.config uninstall_* *.bat net.i2p.router.plist.template" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/Start I2P Router.app/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/portable/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/small/" />
             <fileset dir="../i2p-${Extended.Version}/Slackware" />
             <fileset dir="../i2p-${Extended.Version}/_MTN" />
             <fileset dir="../i2p-${Extended.Version}/.idea" />
@@ -2318,9 +2494,14 @@
             <file name="../i2p-${Extended.Version}/.mtn-ignore" />
             <fileset dir="../i2p-${Extended.Version}/" includes="Docker*" />
             <file name="../i2p-${Extended.Version}/Makefile.gcj" />
+            <fileset dir="../i2p-${Extended.Version}/docs" />
+            <fileset dir="../i2p-${Extended.Version}/launchers" />
+            <file name="../i2p-${Extended.Version}/.travis.yml" />
+            <file name="../i2p-${Extended.Version}/.gitignore" />
             <!-- gradle files -->
             <fileset dir="../i2p-${Extended.Version}/" includes="**/build.gradle" />
             <fileset dir="../i2p-${Extended.Version}/gradle" />
+            <file name="../i2p-${Extended.Version}/gradlew" />
             <file name="../i2p-${Extended.Version}/gradlew.bat" />
             <file name="../i2p-${Extended.Version}/gradle.properties" />
             <file name="../i2p-${Extended.Version}/settings.gradle" />
@@ -2328,6 +2509,8 @@
             <fileset dir="../i2p-${Extended.Version}/core/java/src/gnu/gettext" />
             <!-- libgetopt-java -->
             <fileset dir="../i2p-${Extended.Version}/core/java/src/gnu/getopt" />
+            <!-- libjson-simple-java -->
+            <fileset dir="../i2p-${Extended.Version}/core/java/src/org/json" />
             <!-- libhttpclient-java and libhttpcore-java -->
           <!--
             <fileset dir="../i2p-${Extended.Version}/core/java/src/org/apache/http" />
@@ -2335,28 +2518,23 @@
             <!-- geoip-database -->
             <file name="../i2p-${Extended.Version}/installer/resources/geoip.txt" />
             <file name="../i2p-${Extended.Version}/installer/resources/geoipv6.dat.gz" />
+            <file name="../i2p-${Extended.Version}/installer/resources/GeoLite2-Country.mmdb.gz" />
             <!-- libjetty9-java -->
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-9.2.22.v20170606" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-${jetty.ver}" />
             <!-- libtomcat8-java -->
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-8.5.23" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-${tomcat.ver}" />
             <!-- libjstl1.1-java or glassfish-javaee or libtaglibs-standard -->
             <file name="../i2p-${Extended.Version}/apps/susidns/src/lib/jstl.jar" />
             <!-- libjakarta-taglibs-standard-java or glassfish-javaee or libtaglibs-standard -->
             <file name="../i2p-${Extended.Version}/apps/susidns/src/lib/standard.jar" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/icons/flags" />
             <!-- anything added above, add in debian-release-tarball also -->
         </delete>
         <tar longfile="gnu" destfile="../${debian.tarball.name}" compression="bzip2">
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${Extended.Version}">
                 <include name="**/**" />
                 <exclude name="debian/**"/>
-                <exclude name="debian-alt/**"/>
                 <exclude name="**/*.sh"/>
-                <exclude name="installer/resources/geoip.txt"/>
-                <exclude name="installer/resources/geoipv6.dat.gz"/>
-                <exclude name="apps/jetty/jetty-distribution-*/**"/>
-                <exclude name="apps/jetty/apache-tomcat-*/**"/>
-                <exclude name="apps/susidns/src/lib/jstl.jar" />
-                <exclude name="apps/susidns/src/lib/standard.jar" />
                 <!-- anything added above, add in debian-release-tarball also -->
             </tarfileset>
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${Extended.Version}" filemode="755">
@@ -2385,7 +2563,14 @@
         </exec>
         <delete includeemptydirs="true" quiet="false" failonerror="false">
             <fileset dir="../i2p-${Extended.Version}/debian-alt/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/" includes="*.xml" />
+            <fileset dir="../i2p-${Extended.Version}/installer/c/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/doc/" />
             <fileset dir="../i2p-${Extended.Version}/installer/lib/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources" includes="checklist.md deletelist.txt install_* geoipv6-extras.csv makegeoip* po4a.config uninstall_* *.bat net.i2p.router.plist.template" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/Start I2P Router.app/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/portable/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/small/" />
             <fileset dir="../i2p-${Extended.Version}/Slackware" />
             <fileset dir="../i2p-${Extended.Version}/_MTN" />
             <fileset dir="../i2p-${Extended.Version}/.idea" />
@@ -2393,6 +2578,10 @@
             <file name="../i2p-${Extended.Version}/.mtn-ignore" />
             <fileset dir="../i2p-${Extended.Version}/" includes="Docker*" />
             <file name="../i2p-${Extended.Version}/Makefile.gcj" />
+            <fileset dir="../i2p-${Extended.Version}/docs" />
+            <fileset dir="../i2p-${Extended.Version}/launchers" />
+            <file name="../i2p-${Extended.Version}/.travis.yml" />
+            <file name="../i2p-${Extended.Version}/.gitignore" />
             <!-- gradle files -->
             <fileset dir="../i2p-${Extended.Version}/" includes="**/build.gradle" />
             <fileset dir="../i2p-${Extended.Version}/gradle" />
@@ -2411,10 +2600,11 @@
             <!-- geoip-database -->
             <file name="../i2p-${Extended.Version}/installer/resources/geoip.txt" />
             <file name="../i2p-${Extended.Version}/installer/resources/geoipv6.dat.gz" />
+            <file name="../i2p-${Extended.Version}/installer/resources/GeoLite2-Country.mmdb.gz" />
             <!-- libjetty9-java -->
           <!--
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-9.2.22.v20170606" />
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-8.5.23" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-${jetty.ver}" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-${tomcat.ver}" />
            -->
             <!-- libjstl1.1-java or glassfish-javaee -->
           <!--
@@ -2422,24 +2612,14 @@
            -->
             <!-- libjakarta-taglibs-standard-java or glassfish-javaee -->
             <file name="../i2p-${Extended.Version}/apps/susidns/src/lib/standard.jar" />
+            <!-- famfamfam-flag-png is in trusty but not precise, so leave them in the source package for both -->
             <!-- anything added above, add in debian-release-tarball also -->
         </delete>
         <tar longfile="gnu" destfile="../${debian.tarball.name}" compression="bzip2">
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${Extended.Version}">
                 <include name="**/**" />
                 <exclude name="debian/**"/>
-                <exclude name="debian-alt/**"/>
                 <exclude name="**/*.sh"/>
-                <exclude name="installer/resources/geoip.txt"/>
-                <exclude name="installer/resources/geoipv6.dat.gz"/>
-          <!--
-                <exclude name="apps/jetty/jetty-distribution-*/**"/>
-                <exclude name="apps/jetty/apache-tomcat-*/**"/>
-           -->
-          <!--
-                <exclude name="apps/susidns/src/lib/jstl.jar" />
-           -->
-                <exclude name="apps/susidns/src/lib/standard.jar" />
                 <!-- anything added above, add in debian-release-tarball also -->
             </tarfileset>
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${Extended.Version}" filemode="755">
@@ -2470,7 +2650,14 @@
         </exec>
         <delete includeemptydirs="true" quiet="false" failonerror="false">
             <fileset dir="../i2p-${Extended.Version}/debian-alt/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/" includes="*.xml" />
+            <fileset dir="../i2p-${Extended.Version}/installer/c/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/doc/" />
             <fileset dir="../i2p-${Extended.Version}/installer/lib/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources" includes="checklist.md deletelist.txt install_* geoipv6-extras.csv makegeoip* po4a.config uninstall_* *.bat net.i2p.router.plist.template" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/Start I2P Router.app/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/portable/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/small/" />
             <fileset dir="../i2p-${Extended.Version}/Slackware" />
             <fileset dir="../i2p-${Extended.Version}/_MTN" />
             <fileset dir="../i2p-${Extended.Version}/.idea" />
@@ -2478,6 +2665,10 @@
             <file name="../i2p-${Extended.Version}/.mtn-ignore" />
             <fileset dir="../i2p-${Extended.Version}/" includes="Docker*" />
             <file name="../i2p-${Extended.Version}/Makefile.gcj" />
+            <fileset dir="../i2p-${Extended.Version}/docs" />
+            <fileset dir="../i2p-${Extended.Version}/launchers" />
+            <file name="../i2p-${Extended.Version}/.travis.yml" />
+            <file name="../i2p-${Extended.Version}/.gitignore" />
             <!-- gradle files -->
             <fileset dir="../i2p-${Extended.Version}/" includes="**/build.gradle" />
             <fileset dir="../i2p-${Extended.Version}/gradle" />
@@ -2487,33 +2678,27 @@
             <file name="../i2p-${Extended.Version}/settings.gradle" />
             <fileset dir="../i2p-${Extended.Version}/core/java/src/gnu/gettext" />
             <fileset dir="../i2p-${Extended.Version}/core/java/src/gnu/getopt" />
+            <fileset dir="../i2p-${Extended.Version}/core/java/src/org/json" />
           <!--
             <fileset dir="../i2p-${Extended.Version}/core/java/src/org/apache/http" />
            -->
             <file name="../i2p-${Extended.Version}/installer/resources/geoip.txt" />
             <file name="../i2p-${Extended.Version}/installer/resources/geoipv6.dat.gz" />
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-9.2.22.v20170606" />
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-8.5.23" />
+            <file name="../i2p-${Extended.Version}/installer/resources/GeoLite2-Country.mmdb.gz" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-${jetty.ver}" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-${tomcat.ver}" />
           <!--
             <file name="../i2p-${Extended.Version}/apps/susidns/src/lib/jstl.jar" />
            -->
             <file name="../i2p-${Extended.Version}/apps/susidns/src/lib/standard.jar" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/icons/flags" />
             <!-- anything added above, add in debian-tarball also -->
         </delete>
         <tar longfile="gnu" destfile="../${debian.tarball.name}" compression="bzip2">
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${release.number}">
                 <include name="**/**" />
                 <exclude name="debian/**"/>
-                <exclude name="debian-alt/**"/>
                 <exclude name="**/*.sh"/>
-                <exclude name="installer/resources/geoip.txt"/>
-                <exclude name="installer/resources/geoipv6.dat.gz"/>
-                <exclude name="apps/jetty/jetty-distribution-*/**"/>
-                <exclude name="apps/jetty/apache-tomcat-*/**"/>
-              <!--
-                <exclude name="apps/susidns/src/lib/jstl.jar" />
-               -->
-                <exclude name="apps/susidns/src/lib/standard.jar" />
                 <!-- anything added above, add in debian-tarball also -->
             </tarfileset>
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${release.number}" filemode="755">
@@ -2540,7 +2725,14 @@
         </exec>
         <delete includeemptydirs="true" quiet="false" failonerror="false">
             <fileset dir="../i2p-${Extended.Version}/debian-alt/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/" includes="*.xml" />
+            <fileset dir="../i2p-${Extended.Version}/installer/c/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/doc/" />
             <fileset dir="../i2p-${Extended.Version}/installer/lib/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources" includes="checklist.md deletelist.txt install_* geoipv6-extras.csv makegeoip* po4a.config uninstall_* *.bat net.i2p.router.plist.template" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/Start I2P Router.app/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/portable/" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/small/" />
             <fileset dir="../i2p-${Extended.Version}/Slackware" />
             <fileset dir="../i2p-${Extended.Version}/_MTN" />
             <fileset dir="../i2p-${Extended.Version}/.idea" />
@@ -2548,6 +2740,10 @@
             <file name="../i2p-${Extended.Version}/.mtn-ignore" />
             <fileset dir="../i2p-${Extended.Version}/" includes="Docker*" />
             <file name="../i2p-${Extended.Version}/Makefile.gcj" />
+            <fileset dir="../i2p-${Extended.Version}/docs" />
+            <fileset dir="../i2p-${Extended.Version}/launchers" />
+            <file name="../i2p-${Extended.Version}/.travis.yml" />
+            <file name="../i2p-${Extended.Version}/.gitignore" />
             <!-- gradle files -->
             <fileset dir="../i2p-${Extended.Version}/" includes="**/build.gradle" />
             <fileset dir="../i2p-${Extended.Version}/gradle" />
@@ -2557,29 +2753,25 @@
             <file name="../i2p-${Extended.Version}/settings.gradle" />
             <fileset dir="../i2p-${Extended.Version}/core/java/src/gnu/gettext" />
             <fileset dir="../i2p-${Extended.Version}/core/java/src/gnu/getopt" />
+            <fileset dir="../i2p-${Extended.Version}/core/java/src/org/json" />
           <!--
             <fileset dir="../i2p-${Extended.Version}/core/java/src/org/apache/http" />
            -->
             <file name="../i2p-${Extended.Version}/installer/resources/geoip.txt" />
             <file name="../i2p-${Extended.Version}/installer/resources/geoipv6.dat.gz" />
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-9.2.22.v20170606" />
-            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-8.5.23" />
+            <file name="../i2p-${Extended.Version}/installer/resources/GeoLite2-Country.mmdb.gz" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/jetty-distribution-${jetty.ver}" />
+            <fileset dir="../i2p-${Extended.Version}/apps/jetty/apache-tomcat-${tomcat.ver}" />
             <file name="../i2p-${Extended.Version}/apps/susidns/src/lib/jstl.jar" />
             <file name="../i2p-${Extended.Version}/apps/susidns/src/lib/standard.jar" />
+            <fileset dir="../i2p-${Extended.Version}/installer/resources/icons/flags" />
             <!-- anything added above, add in debian-tarball also -->
         </delete>
         <tar longfile="gnu" destfile="../${debian.tarball.name}" compression="bzip2">
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${release.number}">
                 <include name="**/**" />
                 <exclude name="debian/**"/>
-                <exclude name="debian-alt/**"/>
                 <exclude name="**/*.sh"/>
-                <exclude name="installer/resources/geoip.txt"/>
-                <exclude name="installer/resources/geoipv6.dat.gz"/>
-                <exclude name="apps/jetty/jetty-distribution-*/**"/>
-                <exclude name="apps/jetty/apache-tomcat-*/**"/>
-                <exclude name="apps/susidns/src/lib/jstl.jar" />
-                <exclude name="apps/susidns/src/lib/standard.jar" />
                 <!-- anything added above, add in debian-tarball also -->
             </tarfileset>
             <tarfileset dir="../i2p-${Extended.Version}" prefix="/i2p-${release.number}" filemode="755">
@@ -2662,11 +2854,8 @@
 				<fileset dir="installer/resources/themes/console/images/" />
 			</copy>
 			<!-- FLAGs for language icon (not for ip)-->
-			<copy todir="pkg-temp/docs/icons/flags" >
-				<fileset dir="installer/resources/icons/flags/" includes="cn.png,de.png,fr.png,nl.png,ru.png,se.png,us.png" />
-			</copy>
-			<copy todir="pkg-temp/docs/icons/flags48x48" >
-				<fileset dir="installer/resources/icons/flags48x48" />
+			<copy todir="pkg-temp/docs/icons" >
+				<fileset dir="installer/resources/icons" />
 			</copy>
 		<mkdir dir="pkg-temp/webapps" />
 			<copy todir="pkg-temp/webapps/">

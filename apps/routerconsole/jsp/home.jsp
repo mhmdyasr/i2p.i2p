@@ -11,14 +11,14 @@
     String consoleNonce = net.i2p.router.web.CSSHelper.getNonce();
 %>
 <jsp:useBean class="net.i2p.router.web.NewsHelper" id="newshelper" scope="request" />
-<jsp:setProperty name="newshelper" property="contextId" value="<%=(String)session.getAttribute(\"i2p.contextId\")%>" />
+<jsp:setProperty name="newshelper" property="contextId" value="<%=i2pcontextId%>" />
 <%
     java.io.File fpath = new java.io.File(net.i2p.I2PAppContext.getGlobalContext().getRouterDir(), "docs/news.xml");
 %>
  <jsp:setProperty name="newshelper" property="page" value="<%=fpath.getAbsolutePath()%>" />
  <jsp:setProperty name="newshelper" property="maxLines" value="300" />
  <jsp:useBean class="net.i2p.router.web.ConfigUpdateHelper" id="updatehelper" scope="request" />
- <jsp:setProperty name="updatehelper" property="contextId" value="<%=(String)session.getAttribute(\"i2p.contextId\")%>" />
+ <jsp:setProperty name="updatehelper" property="contextId" value="<%=i2pcontextId%>" />
 
 <div class="routersummaryouter">
  <div class="routersummary">
@@ -55,12 +55,13 @@
 
 <div class="main" id="home">
 <jsp:useBean class="net.i2p.router.web.helpers.HomeHelper" id="homehelper" scope="request" />
-<jsp:setProperty name="homehelper" property="contextId" value="<%=(String)session.getAttribute(\"i2p.contextId\")%>" />
+<jsp:setProperty name="homehelper" property="contextId" value="<%=i2pcontextId%>" />
 <% if (homehelper.shouldShowWelcome()) { %>
 <div class="welcome" title="<%=intl._t("Click a flag to select a language. Click 'Configure UI' below to change it later.")%>">
   <div class="langbox" id="langbox">
     <a href="/home?lang=en&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=us" title="English" alt="English"></a>
     <a href="/home?lang=ar&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=lang_ar" title="Arabic عربية" alt="Arabic عربية"></a>
+    <a href="/home?lang=az&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=az" title="Azerbaijani" alt="Azerbaijani"></a>
     <a href="/home?lang=cs&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=cz" title="Čeština" alt="Čeština"></a>
     <a href="/home?lang=zh&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=cn" title="Chinese 中文" alt="Chinese 中文"></a>
     <a href="/home?lang=zh_TW&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=tw" title="Chinese 中文 (Taiwan)" alt="Chinese 中文 (Taiwan)"></a>
@@ -74,7 +75,8 @@
     <a href="/home?lang=in&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=id" title="bahasa Indonesia" alt="bahasa Indonesia"></a>
     <a href="/home?lang=it&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=it" title="Italiano" alt="Italiano"></a>
     <a href="/home?lang=ja&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=jp" title="Japanese 日本語" alt="Japanese 日本語"></a>
-    <a href="/home?lang=ko&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=kr" title="Korean 한국어" alt="Korean 한국어"></a><br>
+<br>
+    <a href="/home?lang=ko&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=kr" title="Korean 한국어" alt="Korean 한국어"></a>
     <a href="/home?lang=mg&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=mg" title="Malagasy" alt="Malagasy"></a>
     <a href="/home?lang=hu&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=hu" title="Magyar" alt="Magyar"></a>
     <a href="/home?lang=nb&amp;consoleNonce=<%=consoleNonce%>"><img height="11" width="16" style="padding: 0 2px;" src="/flags.jsp?c=no" title="Norsk (bokmål)" alt="Norsk (bokmål)"></a>
@@ -107,7 +109,7 @@
         <button type="submit" value="search" class="search"><%=intl._t("Search")%></button>
       </td><td align="left">
         <jsp:useBean class="net.i2p.router.web.helpers.SearchHelper" id="searchhelper" scope="request" />
-        <jsp:setProperty name="searchhelper" property="contextId" value="<%=(String)session.getAttribute(\"i2p.contextId\")%>" />
+        <jsp:setProperty name="searchhelper" property="contextId" value="<%=i2pcontextId%>" />
         <jsp:getProperty name="searchhelper" property="selector" />
       </td></tr></table>
     </form>
@@ -116,12 +118,13 @@
    }  // shouldShowSearch()
 %>
   <div class="ag2">
-    <h4 class="app"><%=intl._t("Applications and Configuration")%></h4>
-    <jsp:getProperty name="homehelper" property="services" /><br>
-  </div>
-  <div class="ag2">
     <h4 class="app2"><%=intl._t("Hidden Services of Interest")%></h4>
     <jsp:getProperty name="homehelper" property="favorites" /><br>
+    <div class="clearer">&nbsp;</div>
+  </div>
+  <div class="ag2">
+    <h4 class="app"><%=intl._t("Applications and Configuration")%></h4>
+    <jsp:getProperty name="homehelper" property="services" /><br>
     <div class="clearer">&nbsp;</div>
   </div>
 </div>
