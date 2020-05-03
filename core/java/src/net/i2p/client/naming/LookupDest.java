@@ -30,13 +30,11 @@ import net.i2p.data.Hash;
  * Using an existing I2PSession is much more efficient and
  * flexible than using this class.
  *
+ * Public since 0.9.45 only for main(). Not a public API.
  */
-class LookupDest {
+public class LookupDest {
 
     private static final long DEFAULT_TIMEOUT = 15*1000;
-    private static final String PROP_ENABLE_SSL = "i2cp.SSL";
-    private static final String PROP_USER = "i2cp.username";
-    private static final String PROP_PW = "i2cp.password";
 
     protected LookupDest(I2PAppContext context) {}
 
@@ -110,24 +108,47 @@ class LookupDest {
             s = ctx.getProperty(I2PClient.PROP_TCP_PORT);
             if (s != null)
                 opts.put(I2PClient.PROP_TCP_PORT, s);
-            s = ctx.getProperty(PROP_ENABLE_SSL);
+            s = ctx.getProperty(I2PClient.PROP_ENABLE_SSL);
             if (s != null)
-                opts.put(PROP_ENABLE_SSL, s);
-            s = ctx.getProperty(PROP_USER);
+                opts.put(I2PClient.PROP_ENABLE_SSL, s);
+            s = ctx.getProperty(I2PClient.PROP_USER);
             if (s != null)
-                opts.put(PROP_USER, s);
-            s = ctx.getProperty(PROP_PW);
+                opts.put(I2PClient.PROP_USER, s);
+            s = ctx.getProperty(I2PClient.PROP_PW);
             if (s != null)
-                opts.put(PROP_PW, s);
+                opts.put(I2PClient.PROP_PW, s);
         }
         return opts;
     }
 
-    public static void main(String args[]) throws I2PSessionException {
-        Destination dest = lookupBase32Hash(I2PAppContext.getGlobalContext(), args[0]);
-        if (dest == null)
-            System.out.println("Destination not found!");
-        else
-            System.out.println(dest.toBase64());
+    /**
+     *  TODO: does not support hostnames, extended b32, I2CP options...
+     */
+    public static void main(String args[]) {
+        if (args.length != 1) {
+            System.err.println("Usage: LookupDest base32");
+            System.exit(1);
+        }
+        String arg = args[0];
+        if (arg.endsWith(".b32.i2p"))
+            arg = arg.substring(0, arg.length() - 8);
+        if (arg.length() != 52) {
+            System.err.println("Bad Base32 format");
+            System.exit(1);
+        }
+        byte[] h = Base32.decode(arg);
+        if (h == null) {
+            System.err.println("Bad Base32 format");
+            System.exit(1);
+        }
+        try {
+            Destination dest = lookupHash(I2PAppContext.getGlobalContext(), h);
+            if (dest == null)
+                System.err.println("Destination not found!");
+            else
+                System.out.println(dest.toBase64());
+        } catch (I2PSessionException ise) {
+            ise.printStackTrace();
+        }
     }
 }

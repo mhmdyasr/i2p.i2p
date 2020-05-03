@@ -2,10 +2,9 @@ package net.i2p.router.transport.crypto;
 
 import java.util.concurrent.LinkedBlockingQueue;
 
-import com.southernstorm.noise.crypto.x25519.Curve25519;
-
 import net.i2p.I2PAppContext;
 import net.i2p.crypto.EncType;
+import net.i2p.crypto.KeyFactory;
 import net.i2p.crypto.KeyPair;
 import net.i2p.data.PrivateKey;
 import net.i2p.data.PublicKey;
@@ -21,7 +20,7 @@ import net.i2p.util.SystemVersion;
  *
  *  @since 0.9.36 from DHSessionKeyFactory.PrecalcRunner
  */
-public class X25519KeyFactory extends I2PThread {
+public class X25519KeyFactory extends I2PThread implements KeyFactory {
 
     private final I2PAppContext _context;
     private final Log _log;
@@ -77,6 +76,17 @@ public class X25519KeyFactory extends I2PThread {
     }
 
     public void run() {
+        try {
+            run2();
+        } catch (IllegalStateException ise) {
+            if (_isRunning)
+                throw ise;
+            // else ignore, thread can be slow to shutdown on Android,
+            // PRNG gets stopped first and throws ISE
+        }
+    }
+
+    private void run2() {
         _isRunning = true;
         while (_isRunning) {
             int startSize = getSize();
@@ -128,15 +138,7 @@ public class X25519KeyFactory extends I2PThread {
 
     private KeyPair precalc() {
         long start = System.currentTimeMillis();
-        byte[] priv = new byte[32];
-        do {
-            _context.random().nextBytes(priv);
-            // little endian, loop if too small
-            // worth doing?
-        } while (priv[31] == 0);
-        byte[] pub = new byte[32];
-        Curve25519.eval(pub, 0, priv, null);
-        KeyPair rv = new KeyPair(new PublicKey(EncType.ECIES_X25519, pub), new PrivateKey(EncType.ECIES_X25519, priv));
+        KeyPair rv = _context.keyGenerator().generatePKIKeys(EncType.ECIES_X25519);
         long end = System.currentTimeMillis();
         long diff = end - start;
         _context.statManager().addRateData("crypto.XDHGenerateTime", diff);
@@ -150,8 +152,10 @@ public class X25519KeyFactory extends I2PThread {
      * to be put back onto the queue for reuse.
      */
     public void returnUnused(KeyPair kp) {
+/*
         _context.statManager().addRateData("crypto.XDHReused", 1);
         _keys.offer(kp);
+*/
     }
 
     /** @return true if successful, false if full */

@@ -21,6 +21,7 @@ import net.i2p.util.ConvertToHash;
 import net.i2p.util.LHMCache;
 import net.i2p.util.Log;
 import net.i2p.util.SimpleTimer2;
+import net.i2p.client.streaming.IncomingConnectionFilter;
 
 /**
  * Coordinate all of the connections for a single local destination.
@@ -38,6 +39,7 @@ class ConnectionManager {
     private final SchedulerChooser _schedulerChooser;
     private final ConnectionPacketHandler _conPacketHandler;
     private final TCBShare _tcbShare;
+    private final IncomingConnectionFilter _connectionFilter;
     /** Inbound stream ID (Long) to Connection map */
     private final ConcurrentHashMap<Long, Connection> _connectionByInboundId;
     /** Ping ID (Long) to PingRequest */
@@ -81,10 +83,14 @@ class ConnectionManager {
     /**
      *  Manage all conns for this session
      */
-    public ConnectionManager(I2PAppContext context, I2PSession session, ConnectionOptions defaultOptions) {
+    public ConnectionManager(I2PAppContext context, 
+                             I2PSession session, 
+                             ConnectionOptions defaultOptions,
+                             IncomingConnectionFilter connectionFilter) {
         _context = context;
         _session = session;
         _defaultOptions = defaultOptions;
+        _connectionFilter = connectionFilter;
         _log = _context.logManager().getLog(ConnectionManager.class);
         _connectionByInboundId = new ConcurrentHashMap<Long,Connection>(32);
         _pendingPings = new ConcurrentHashMap<Long,PingRequest>(4);
@@ -104,7 +110,7 @@ class ConnectionManager {
         int protocol = defaultOptions.getEnforceProtocol() ? I2PSession.PROTO_STREAMING : I2PSession.PROTO_ANY;
         _session.addMuxedSessionListener(_messageHandler, protocol, defaultOptions.getLocalPort());
         _outboundQueue = new PacketQueue(_context, _timer);
-        _recentlyClosed = new LHMCache<Long, Object>(64);
+        _recentlyClosed = new LHMCache<Long, Object>(128);
         /** Socket timeout for accept() */
         _soTimeout = -1;
 
@@ -116,7 +122,6 @@ class ConnectionManager {
         _context.statManager().createRateStat("stream.con.lifetimeDupMessagesSent", "How many duplicate messages do we send on a stream?", "Stream", new long[] { 60*60*1000, 24*60*60*1000 });
         _context.statManager().createRateStat("stream.con.lifetimeDupMessagesReceived", "How many duplicate messages do we receive on a stream?", "Stream", new long[] { 60*60*1000, 24*60*60*1000 });
         _context.statManager().createRateStat("stream.con.lifetimeRTT", "What is the final RTT when a stream closes?", "Stream", new long[] { 60*60*1000, 24*60*60*1000 });
-        _context.statManager().createRateStat("stream.con.lifetimeCongestionSeenAt", "When was the last congestion seen at when a stream closes?", "Stream", new long[] { 60*60*1000, 24*60*60*1000 });
         _context.statManager().createRateStat("stream.con.lifetimeSendWindowSize", "What is the final send window size when a stream closes?", "Stream", new long[] { 60*60*1000, 24*60*60*1000 });
         _context.statManager().createRateStat("stream.receiveActive", "How many streams are active when a new one is received (period being not yet dropped)", "Stream", new long[] { 60*60*1000, 24*60*60*1000 });
         // Stats for Connection
@@ -655,6 +660,10 @@ class ConnectionManager {
                         " per minute";
         }
 
+        if (!_connectionFilter.allowDestination(from)) {
+            return "not allowed by filter";
+        }
+
         return null;
     }
 
@@ -755,7 +764,6 @@ class ConnectionManager {
             _context.statManager().addRateData("stream.con.lifetimeDupMessagesSent", con.getLifetimeDupMessagesSent(), con.getLifetime());
             _context.statManager().addRateData("stream.con.lifetimeDupMessagesReceived", con.getLifetimeDupMessagesReceived(), con.getLifetime());
             _context.statManager().addRateData("stream.con.lifetimeRTT", con.getOptions().getRTT(), con.getLifetime());
-            _context.statManager().addRateData("stream.con.lifetimeCongestionSeenAt", con.getLastCongestionSeenAt(), con.getLifetime());
             _context.statManager().addRateData("stream.con.lifetimeSendWindowSize", con.getOptions().getWindowSize(), con.getLifetime());
             if (I2PSocketManagerFull.pcapWriter != null)
                 I2PSocketManagerFull.pcapWriter.flush();

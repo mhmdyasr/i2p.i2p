@@ -29,11 +29,7 @@ sourceSets {
             }
         }
         resources {
-            srcDir 'java/test/junit'
-            include 'resources/*'
-            include 'net/i2p/crypto/eddsa/test.data'
-            include 'net/i2p/crypto/eddsa/math/baseDblPrecmp'
-            include 'net/i2p/crypto/eddsa/math/basePrecmp'
+            srcDir 'java/test/resources'
         }
     }
     jmh {
@@ -69,6 +65,14 @@ if (System.getenv("TARGET_JAVA_HOME") == null && JavaVersion.current() != JavaVe
         classpath = sourceSets.test.runtimeClasspath
     }
     test.dependsOn scalaTest
+}
+
+jar {
+    manifest {
+        attributes 'Specification-Title': 'I2P Core API'
+        attributes 'Implementation-Title': 'I2P Java Core API'
+        attributes 'Main-Class': 'net.i2p.util.CommandLine'
+    }
 }
 
 configurations {

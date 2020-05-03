@@ -88,6 +88,7 @@ class InboundEstablishState extends EstablishBase implements NTCP2Payload.Payloa
     private static final Set<State> STATES_NTCP2 =
         EnumSet.of(State.IB_NTCP2_INIT, State.IB_NTCP2_GOT_X, State.IB_NTCP2_GOT_PADDING,
                    State.IB_NTCP2_SENT_Y, State.IB_NTCP2_GOT_RI, State.IB_NTCP2_READ_RANDOM);
+    private static final Set<State> STATES_MSG3 = EnumSet.of(State.IB_SENT_Y, State.IB_GOT_RI_SIZE, State.IB_GOT_RI);
 
     
     public InboundEstablishState(RouterContext ctx, NTCPTransport transport, NTCPConnection con) {
@@ -270,9 +271,7 @@ class InboundEstablishState extends EstablishBase implements NTCP2Payload.Payloa
         }
 
         // ok, we are onto the encrypted area, i.e. Message #3
-        while ((_state == State.IB_SENT_Y ||
-                _state == State.IB_GOT_RI_SIZE ||
-                _state == State.IB_GOT_RI) && src.hasRemaining()) {
+        while (STATES_MSG3.contains(_state) && src.hasRemaining()) {
 
                 // Collect a 16-byte block
                 if (_received < AES_SIZE && src.hasRemaining()) {
@@ -370,7 +369,7 @@ class InboundEstablishState extends EstablishBase implements NTCP2Payload.Payloa
         }
 
         // check for remaining data
-        if ((_state == State.VERIFIED || _state == State.CORRUPT) && src.hasRemaining()) {
+        if (STATES_DONE.contains(_state) && src.hasRemaining()) {
             if (_log.shouldWarn())
                 _log.warn("Received unexpected " + src.remaining() + " on " + this, new Exception());
         }
@@ -682,7 +681,7 @@ class InboundEstablishState extends EstablishBase implements NTCP2Payload.Payloa
             }
 
             try {
-                _handshakeState = new HandshakeState(HandshakeState.RESPONDER, _transport.getXDHFactory());
+                _handshakeState = new HandshakeState(HandshakeState.PATTERN_ID_XK, HandshakeState.RESPONDER, _transport.getXDHFactory());
             } catch (GeneralSecurityException gse) {
                 throw new IllegalStateException("bad proto", gse);
             }
@@ -729,6 +728,20 @@ class InboundEstablishState extends EstablishBase implements NTCP2Payload.Payloa
                 fail("Bad version: " + v);
                 return;
             }
+            // network ID cross-check, proposal 147, as of 0.9.42
+            v = options[0] & 0xff;
+            if (v != 0 && v != _context.router().getNetworkID()) {
+                InetAddress addr = _con.getChannel().socket().getInetAddress();
+                if (addr != null) {
+                    if (_log.shouldLog(Log.WARN))
+                        _log.warn("Dropping inbound connection from wrong network: " + addr);
+                    byte[] ip = addr.getAddress();
+                    // So next time we will not accept the con from this IP
+                    _context.blocklist().add(ip);
+                }
+                fail("Bad network id: " + v);
+                return;
+            }
             _padlen1 = (int) DataHelper.fromLong(options, 2, 2);
             _msg3p2len = (int) DataHelper.fromLong(options, 4, 2);
             long tsA = DataHelper.fromLong(options, 8, 4);
@@ -746,8 +759,8 @@ class InboundEstablishState extends EstablishBase implements NTCP2Payload.Payloa
                 fail("Clock Skew: " + _peerSkew, null, true);
                 return;
             }
-            // TODO if NTCP1 disabled, we should allow longer padding
-            if (_padlen1 > PADDING1_MAX) {
+            // If NTCP1 disabled, we allow longer padding
+            if (_padlen1 > PADDING1_MAX && _transport.isNTCP1Enabled()) {
                 fail("bad msg 1 padlen: " + _padlen1);
                 return;
             }

@@ -10,11 +10,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import net.i2p.crypto.EncType;
 import net.i2p.data.Destination;
 import net.i2p.data.Hash;
 import net.i2p.data.TunnelId;
 import net.i2p.router.ClientTunnelSettings;
 import net.i2p.router.JobImpl;
+import net.i2p.router.LeaseSetKeys;
 import net.i2p.router.RouterContext;
 import net.i2p.router.TunnelInfo;
 import net.i2p.router.TunnelManagerFacade;
@@ -46,6 +48,7 @@ public class TunnelPoolManager implements TunnelManagerFacade {
 
     private static final int MIN_KBPS_TWO_HANDLERS = 512;
     private static final int MIN_KBPS_THREE_HANDLERS = 1024;
+    private static final double MAX_SHARE_RATIO = 10000d;
     
     public TunnelPoolManager(RouterContext ctx) {
         _context = ctx;
@@ -129,7 +132,7 @@ public class TunnelPoolManager implements TunnelManagerFacade {
         }
         if (_log.shouldLog(Log.ERROR))
             _log.error("Want the inbound tunnel for " + destination.toBase32() +
-                     " but there isn't a pool?");
+                     " but there isn't a pool?", new Exception());
         return null;
     }
 
@@ -205,7 +208,7 @@ public class TunnelPoolManager implements TunnelManagerFacade {
         }
         if (_log.shouldLog(Log.ERROR))
             _log.error("Want the inbound tunnel for " + destination.toBase32() +
-                     " but there isn't a pool?");
+                     " but there isn't a pool?", new Exception());
         return null;
     }
 
@@ -312,7 +315,6 @@ public class TunnelPoolManager implements TunnelManagerFacade {
 
     /**
      *  @return (number of part. tunnels) / (estimated total number of hops in our expl.+client tunnels)
-     *  100 max.
      *  We just use length setting, not variance, for speed
      *  @since 0.7.10
      */
@@ -328,8 +330,8 @@ public class TunnelPoolManager implements TunnelManagerFacade {
             count += pool.size() * pool.getSettings().getLength();
         }
         if (count <= 0)
-            return 100d;
-        return Math.min(part / (double) count, 100d);
+            return MAX_SHARE_RATIO;
+        return Math.min(part / (double) count, MAX_SHARE_RATIO);
     }
 
     public boolean isValidTunnel(Hash client, TunnelInfo tunnel) {
@@ -560,26 +562,8 @@ public class TunnelPoolManager implements TunnelManagerFacade {
             (!_context.getBooleanPropertyDefaultTrue("router.disableTunnelTesting") ||
              _context.router().isHidden() ||
              _context.router().getRouterInfo().getAddressCount() <= 0)) {
+            Hash client = cfg.getDestination();
             TunnelPool pool = cfg.getTunnelPool();
-            if (pool == null) {
-                // never seen this before, do we reallly need to bother
-                // trying so hard to find his pool?
-                _log.error("How does this not have a pool?  " + cfg, new Exception("baf"));
-                if (cfg.getDestination() != null) {
-                    if (cfg.isInbound()) {
-                            pool = _clientInboundPools.get(cfg.getDestination());
-                    } else {
-                            pool = _clientOutboundPools.get(cfg.getDestination());
-                    }
-                } else {
-                    if (cfg.isInbound()) {
-                        pool = _inboundExploratory;
-                    } else {
-                        pool = _outboundExploratory;
-                    }
-                }
-                cfg.setTunnelPool(pool);
-            }
             _context.jobQueue().addJob(new TestJob(_context, cfg, pool));
         }
     }
@@ -605,11 +589,11 @@ public class TunnelPoolManager implements TunnelManagerFacade {
     }
 
     private static class BootstrapPool extends JobImpl {
-        private TunnelPool _pool;
+        private final TunnelPool _pool;
         public BootstrapPool(RouterContext ctx, TunnelPool pool) {
             super(ctx);
             _pool = pool;
-            getTiming().setStartAfter(ctx.clock().now() + 30*1000);
+            getTiming().setStartAfter(ctx.clock().now() + 5*1000);
         }
         public String getName() { return "Bootstrap tunnel pool"; }
         public void runJob() {

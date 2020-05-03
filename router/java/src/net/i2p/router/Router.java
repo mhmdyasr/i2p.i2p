@@ -52,6 +52,7 @@ import net.i2p.router.startup.StartupJob;
 import net.i2p.router.startup.WorkingDir;
 import net.i2p.router.tasks.*;
 import net.i2p.router.transport.FIFOBandwidthLimiter;
+import net.i2p.router.transport.UPnPScannerCallback;
 import net.i2p.router.transport.ntcp.NTCPTransport;
 import net.i2p.router.transport.udp.UDPTransport;
 import net.i2p.router.util.EventLog;
@@ -103,6 +104,7 @@ public class Router implements RouterClock.ClockShiftListener {
     private FamilyKeyCrypto _familyKeyCrypto;
     private boolean _familyKeyCryptoFail;
     public final Object _familyKeyLock = new Object();
+    private UPnPScannerCallback _upnpScannerCallback;
     
     public final static String PROP_CONFIG_FILE = "router.configLocation";
     
@@ -186,6 +188,9 @@ public class Router implements RouterClock.ClockShiftListener {
      *  You must call runRouter() after any constructor to start things up.
      *
      *  Config file name is "router.config" unless router.configLocation set in system properties.
+     *
+     *  See two-arg constructor for more information.
+     *
      *  @throws IllegalStateException since 0.9.19 if another router with this config is running
      */
     public Router() { this(null, null); }
@@ -197,6 +202,8 @@ public class Router implements RouterClock.ClockShiftListener {
      *
      *  Config file name is "router.config" unless router.configLocation set in envProps or system properties.
      *
+     *  See two-arg constructor for more information.
+     *
      *  @param envProps may be null
      *  @throws IllegalStateException since 0.9.19 if another router with this config is running
      */
@@ -206,6 +213,8 @@ public class Router implements RouterClock.ClockShiftListener {
      *  Instantiation only. Starts no threads. Does not install updates.
      *  RouterContext is created but not initialized.
      *  You must call runRouter() after any constructor to start things up.
+     *
+     *  See two-arg constructor for more information.
      *
      *  @param configFilename may be null
      *  @throws IllegalStateException since 0.9.19 if another router with this config is running
@@ -235,7 +244,7 @@ public class Router implements RouterClock.ClockShiftListener {
      *  in this constructor.
      *  If files in an existing config dir indicate that another router is already running
      *  with this directory, the constructor will delay for several seconds to be sure,
-     *  and then call System.exit(-1).
+     *  and then throw an IllegalStateException.
      *
      *  @param configFilename may be null
      *  @param envProps may be null
@@ -336,33 +345,35 @@ public class Router implements RouterClock.ClockShiftListener {
         // for the ping file
         // Check for other router but do not start a thread yet so the update doesn't cause
         // a NCDFE
-        for (int i = 0; i < 14; i++) {
-            // Wrapper can start us up too quickly after a crash, the ping file
-            // may still be less than LIVELINESS_DELAY (60s) old.
-            // So wait at least 60s to be sure.
-            if (isOnlyRouterRunning()) {
-                if (i > 0)
-                    System.err.println("INFO: No, there wasn't another router already running. Proceeding with startup.");
-                break;
-            }
-            if (i < 13) {
-                if (i == 0)
-                    System.err.println("WARN: There may be another router already running. Waiting a while to be sure...");
-                // yes this is ugly to sleep in the constructor.
-                try { Thread.sleep(5000); } catch (InterruptedException ie) {}
-            } else {
-                _eventLog.addEvent(EventLog.ABORTED, "Another router running");
-                System.err.println("ERROR: There appears to be another router already running!");
-                System.err.println("       Please make sure to shut down old instances before starting up");
-                System.err.println("       a new one.  If you are positive that no other instance is running,");
-                System.err.println("       please delete the file " + getPingFile().getAbsolutePath());
-                //System.exit(-1);
-                // throw exception instead, for embedded
-                throw new IllegalStateException(
-                                   "ERROR: There appears to be another router already running!" +
-                                   " Please make sure to shut down old instances before starting up" +
-                                   " a new one.  If you are positive that no other instance is running," +
-                                   " please delete the file " + getPingFile().getAbsolutePath());
+        if (!SystemVersion.isAndroid()) {
+            for (int i = 0; i < 14; i++) {
+                // Wrapper can start us up too quickly after a crash, the ping file
+                // may still be less than LIVELINESS_DELAY (60s) old.
+                // So wait at least 60s to be sure.
+                if (isOnlyRouterRunning()) {
+                    if (i > 0)
+                        System.err.println("INFO: No, there wasn't another router already running. Proceeding with startup.");
+                    break;
+                }
+                if (i < 13) {
+                    if (i == 0)
+                        System.err.println("WARN: There may be another router already running. Waiting a while to be sure...");
+                    // yes this is ugly to sleep in the constructor.
+                    try { Thread.sleep(5000); } catch (InterruptedException ie) {}
+                } else {
+                    _eventLog.addEvent(EventLog.ABORTED, "Another router running");
+                    System.err.println("ERROR: There appears to be another router already running!");
+                    System.err.println("       Please make sure to shut down old instances before starting up");
+                    System.err.println("       a new one.  If you are positive that no other instance is running,");
+                    System.err.println("       please delete the file " + getPingFile().getAbsolutePath());
+                    //System.exit(-1);
+                    // throw exception instead, for embedded
+                    throw new IllegalStateException(
+                                       "ERROR: There appears to be another router already running!" +
+                                       " Please make sure to shut down old instances before starting up" +
+                                       " a new one.  If you are positive that no other instance is running," +
+                                       " please delete the file " + getPingFile().getAbsolutePath());
+                }
             }
         }
 
@@ -381,9 +392,15 @@ public class Router implements RouterClock.ClockShiftListener {
         if (sid != null) {
             try {
                 id = Integer.parseInt(sid);
-            } catch (NumberFormatException nfe) {}
+                if (id < 2 || id > 254)
+                    throw new IllegalArgumentException("Invalid " + PROP_NETWORK_ID);
+            } catch (NumberFormatException nfe) {
+                throw new IllegalArgumentException("Invalid " + PROP_NETWORK_ID);
+            }
         }
         _networkID = id;
+        // for testing
+        setUPnPScannerCallback(new LoggerCallback());
         changeState(State.INITIALIZED);
         // *********  Start no threads before here ********* //
     }
@@ -594,6 +611,8 @@ public class Router implements RouterClock.ClockShiftListener {
      *  The network ID. Default 2.
      *  May be changed with the config property router.networkID (restart required).
      *  Change only if running a test network to prevent cross-network contamination.
+     *
+     *  @return 2 - 254
      *  @since 0.9.25
      */
     public int getNetworkID() { return _networkID; }
@@ -606,6 +625,32 @@ public class Router implements RouterClock.ClockShiftListener {
      */
     public RouterContext getContext() { return _context; }
     
+    private class LoggerCallback implements UPnPScannerCallback {
+        public void beforeScan() { _log.info("SSDP beforeScan()"); }
+        public void afterScan() { _log.info("SSDP afterScan()"); }
+    }
+
+    /**
+     *  For Android only.
+     *  MUST be set before runRouter() is called.
+     *
+     *  @param callback the callback or null to clear it
+     *  @since 0.9.41
+     */
+    public synchronized void setUPnPScannerCallback(UPnPScannerCallback callback) {
+        _upnpScannerCallback = callback;
+    }
+
+    /**
+     *  For Android only.
+     *
+     *  @return the callback or null if none
+     *  @since 0.9.41
+     */
+    public synchronized UPnPScannerCallback getUPnPScannerCallback() {
+        return _upnpScannerCallback;
+    }
+
     /**
      *  This must be called after instantiation.
      *  Starts the threads. Does not install updates.
@@ -833,6 +878,16 @@ public class Router implements RouterClock.ClockShiftListener {
     }
 
     /**
+     * @return true if router is RESTARTING (soft restart)
+     * @since 0.9.40
+     */
+    public boolean isRestarting() {
+        synchronized(_stateLock) {
+            return _state == State.RESTARTING;
+        }
+    }
+
+    /**
      *  Only for Restarter, after soft restart is complete.
      *  Not for external use.
      *  @since 0.8.12
@@ -855,6 +910,8 @@ public class Router implements RouterClock.ClockShiftListener {
             } else if (_state == State.EXPL_TUNNELS_READY) {
                 changeState(State.RUNNING);
                 changed = true;
+            } else {
+                _log.warn("Invalid state " + _state + " for setNetDbReady()");
             }
         }
         if (changed) {
@@ -865,6 +922,7 @@ public class Router implements RouterClock.ClockShiftListener {
             // so we probably don't need to throw it to the timer queue,
             // but just to be safe
             _context.simpleTimer2().addEvent(r, 0);
+            _context.commSystem().initGeoIP();
         }
     }
 
@@ -879,6 +937,8 @@ public class Router implements RouterClock.ClockShiftListener {
                 changeState(State.EXPL_TUNNELS_READY);
             else if (_state == State.NETDB_READY)
                 changeState(State.RUNNING);
+            else
+                _log.warn("Invalid state " + _state + " for setExplTunnelsReady()");
         }
     }
 
@@ -1154,7 +1214,7 @@ public class Router implements RouterClock.ClockShiftListener {
         String h = _context.getProperty(PROP_HIDDEN_HIDDEN);
         if (h != null)
             return Boolean.parseBoolean(h);
-        return _context.commSystem().isInBadCountry();
+        return _context.commSystem().isInStrictCountry();
     }
     
     /**
@@ -1423,7 +1483,23 @@ public class Router implements RouterClock.ClockShiftListener {
         }
 
         _context.removeShutdownTasks();
+
+        // All in-JVM clients should be gone by now,
+        // unless they are stuck waiting for tunnels.
+        // If we have any of those, or external clients,
+        // we will wait below for the I2CP disconnect messages to get to them.
+        boolean waitForClients = _killVMOnEnd && !_context.clientManager().listClients().isEmpty();
+        if (_log.shouldWarn())
+            _log.warn("Stopping ClientManager");
         try { _context.clientManager().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the client manager", t); }
+        if (waitForClients) {
+            // Give time for the disconnect messages to get to them
+            // so they can shut down correctly before the JVM goes away
+            try { Thread.sleep(1500); } catch (InterruptedException ie) {}
+            if (_log.shouldWarn())
+                _log.warn("Done waiting for clients to disconnect");
+        }
+
         try { _context.namingService().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the naming service", t); }
         try { _context.jobQueue().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the job queue", t); }
         try { _context.tunnelManager().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the tunnel manager", t); }
@@ -1437,6 +1513,7 @@ public class Router implements RouterClock.ClockShiftListener {
         try { _context.inNetMessagePool().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the inbound net pool", t); }
         try { _context.clientMessagePool().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the client msg pool", t); }
         try { _context.sessionKeyManager().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the session key manager", t); }
+        try { _context.eciesEngine().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the ECIES engine", t); }
         try { _context.messageHistory().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the message history logger", t); }
         // do stat manager last to reduce chance of NPEs in other threads
         try { _context.statManager().shutdown(); } catch (Throwable t) { _log.error("Error shutting down the stats manager", t); }
@@ -1487,9 +1564,16 @@ public class Router implements RouterClock.ClockShiftListener {
                 killKeys();
         }
 
-        File f = getPingFile();
-        f.delete();
-        if (RouterContext.getContexts().isEmpty())
+        if (!SystemVersion.isAndroid()) {
+            File f = getPingFile();
+            f.delete();
+        }
+
+        // Only do this on Android. On desktop, rogue threads
+        // may create a new I2PAppContext before the JVM stops
+        // if we delete this one.
+        //if (RouterContext.getContexts().isEmpty())
+        if (SystemVersion.isAndroid())
             RouterContext.killGlobalContext();
 
         // Since 0.8.8, for Android and the wrapper

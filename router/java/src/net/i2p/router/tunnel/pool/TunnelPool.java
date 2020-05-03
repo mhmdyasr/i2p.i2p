@@ -40,20 +40,20 @@ public class TunnelPool {
     private final TunnelPoolManager _manager;
     protected volatile boolean _alive;
     private long _lifetimeProcessed;
-    private TunnelInfo _lastSelected;
-    private long _lastSelectionPeriod;
+    private int _lastSelectedIdx;
     private final int _expireSkew;
     private long _started;
     private long _lastRateUpdate;
     private long _lastLifetimeProcessed;
     private final String _rateName;
+    private final long _firstInstalled;
 
     private static final int TUNNEL_LIFETIME = 10*60*1000;
     /** if less than one success in this many, reduce quantity (exploratory only) */
     private static final int BUILD_TRIES_QUANTITY_OVERRIDE = 12;
     /** if less than one success in this many, reduce length (exploratory only) */
-    private static final int BUILD_TRIES_LENGTH_OVERRIDE_1 = 10;
-    private static final int BUILD_TRIES_LENGTH_OVERRIDE_2 = 18;
+    private static final int BUILD_TRIES_LENGTH_OVERRIDE_1 = 8;
+    private static final int BUILD_TRIES_LENGTH_OVERRIDE_2 = 12;
     private static final long STARTUP_TIME = 30*60*1000;
     
     TunnelPool(RouterContext ctx, TunnelPoolManager mgr, TunnelPoolSettings settings, TunnelPeerSelector sel) {
@@ -66,6 +66,7 @@ public class TunnelPool {
         _expireSkew = _context.random().nextInt(90*1000);
         _started = System.currentTimeMillis();
         _lastRateUpdate = _started;
+        _firstInstalled = ctx.getProperty("router.firstInstalled", 0L) + 60*60*1000;
         String name;
         if (_settings.isExploratory()) {
             name = "exploratory";
@@ -122,8 +123,6 @@ public class TunnelPool {
         if (_log.shouldLog(Log.WARN))
             _log.warn(toString() + ": Shutdown called");
         _alive = false;
-        _lastSelectionPeriod = 0;
-        _lastSelected = null;
         _context.statManager().removeRateStat(_rateName);
         synchronized (_inProgress) {
             _inProgress.clear();
@@ -150,20 +149,6 @@ public class TunnelPool {
             _settings.readFromProperties(TunnelPoolSettings.PREFIX_OUTBOUND_EXPLORATORY, props);
     }
     
-    /** 
-     * when selecting tunnels, stick with the same one for a brief 
-     * period to allow batching if we can.
-     */
-    private long curPeriod() {
-        long period = _context.clock().now();
-        long ms = period % 1000;
-        if (ms > 500)
-            period = period - ms + 500;
-        else
-            period = period - ms;
-        return period;
-    }
-    
     private long getLifetime() { return System.currentTimeMillis() - _started; }
     
     /**
@@ -178,33 +163,24 @@ public class TunnelPool {
     private TunnelInfo selectTunnel(boolean allowRecurseOnFail) {
         boolean avoidZeroHop = !_settings.getAllowZeroHop();
         
-        long period = curPeriod();
         synchronized (_tunnels) {
-            if (_lastSelectionPeriod == period) {
-                if ( (_lastSelected != null) && 
-                     (_lastSelected.getExpiration() > period) &&
-                     (_tunnels.contains(_lastSelected)) )
-                    return _lastSelected;
-            }
-            _lastSelectionPeriod = period;
-            _lastSelected = null;
-
             if (_tunnels.isEmpty()) {
                 if (_log.shouldLog(Log.WARN))
                     _log.warn(toString() + ": No tunnels to select from");
             } else {
-                Collections.shuffle(_tunnels, _context.random());
                 
                 // if there are nonzero hop tunnels and the zero hop tunnels are fallbacks, 
                 // avoid the zero hop tunnels
                 TunnelInfo backloggedTunnel = null;
                 if (avoidZeroHop) {
                     for (int i = 0; i < _tunnels.size(); i++) {
-                        TunnelInfo info = _tunnels.get(i);
+                        _lastSelectedIdx++;
+                        if (_lastSelectedIdx >= _tunnels.size())
+                            _lastSelectedIdx = 0;
+                        TunnelInfo info = _tunnels.get(_lastSelectedIdx);
                         if ( (info.getLength() > 1) && (info.getExpiration() > _context.clock().now()) ) {
                             // avoid outbound tunnels where the 1st hop is backlogged
                             if (_settings.isInbound() || !_context.commSystem().isBacklogged(info.getPeer(1))) {
-                                _lastSelected = info;
                                 return info;
                             } else {
                                 backloggedTunnel = info;
@@ -227,7 +203,6 @@ public class TunnelPool {
                         if (_settings.isInbound() || info.getLength() <= 1 ||
                             !_context.commSystem().isBacklogged(info.getPeer(1))) {
                             //_log.debug("Selecting tunnel: " + info + " - " + _tunnels);
-                            _lastSelected = info;
                             return info;
                         } else {
                             backloggedTunnel = info;
@@ -315,15 +290,15 @@ public class TunnelPool {
     
     /**
      * Do we really need more fallbacks?
-     * Used to prevent a zillion of them
+     * Used to prevent a zillion of them.
+     * Does not check config, only call if config allows zero hop.
      */
     boolean needFallback() {
-        int needed = getAdjustedTotalQuantity();
-        int fallbacks = 0;
+        long exp = _context.clock().now() + 120*1000;
         synchronized (_tunnels) {
             for (int i = 0; i < _tunnels.size(); i++) {
                 TunnelInfo info = _tunnels.get(i);
-                if (info.getLength() <= 1 && ++fallbacks >= needed)
+                if (info.getLength() <= 1 && info.getExpiration() > exp)
                     return false;
             }
         }
@@ -343,16 +318,22 @@ public class TunnelPool {
      *  generate a lot of exploratory traffic.
      *  TODO high-bandwidth non-floodfills do also...
      *
+     *  Also returns 1 if set for zero hop, client or exploratory.
+     *
      *  @since 0.8.11
      */
     private int getAdjustedTotalQuantity() {
+        if (_settings.getLength() == 0 && _settings.getLengthVariance() == 0)
+            return 1;
         int rv = _settings.getTotalQuantity();
+        if (!_settings.isExploratory())
+            return rv;
         // TODO high-bw non-ff also
-        if (_settings.isExploratory() && _context.netDb().floodfillEnabled() &&
+        if (_context.netDb().floodfillEnabled() &&
             _context.router().getUptime() > 5*60*1000) {
             rv += 2;
         }
-        if (_settings.isExploratory() && rv > 1) {
+        if (rv > 1) {
             RateStat e = _context.statManager().getRate("tunnel.buildExploratoryExpire");
             RateStat r = _context.statManager().getRate("tunnel.buildExploratoryReject");
             RateStat s = _context.statManager().getRate("tunnel.buildExploratorySuccess");
@@ -373,7 +354,7 @@ public class TunnelPool {
                 }
             }
         }
-        if (_settings.isExploratory() && _context.router().getUptime() < STARTUP_TIME) {
+        if (_context.router().getUptime() < STARTUP_TIME) {
             // more exploratory during startup, when we are refreshing the netdb RIs
             rv++;
         }
@@ -406,8 +387,9 @@ public class TunnelPool {
                     long rc = rr.computeAverages(ra, false).getTotalEventCount();
                     long sc = sr.computeAverages(ra, false).getTotalEventCount();
                     long tot = ec + rc + sc;
-                    if (tot >= BUILD_TRIES_LENGTH_OVERRIDE_1) {
-                        long succ = 1000 * sc / tot;
+                    if (tot >= BUILD_TRIES_LENGTH_OVERRIDE_1 ||
+                        _firstInstalled > _context.clock().now()) {
+                        long succ = tot > 0 ? 1000 * sc / tot : 0;
                         if (succ <=  1000 / BUILD_TRIES_LENGTH_OVERRIDE_1) {
                             if (len > 2 && succ <= 1000 / BUILD_TRIES_LENGTH_OVERRIDE_2)
                                 _settings.setLengthOverride(len - 2);
@@ -496,10 +478,6 @@ public class TunnelPool {
             if (_settings.isInbound() && !_settings.isExploratory())
                 ls = locked_buildNewLeaseSet();
             remaining = _tunnels.size();
-            if (_lastSelected == info) {
-                _lastSelected = null;
-                _lastSelectionPeriod = 0;
-            }
         }
 
         _manager.getExecutor().repoll();
@@ -564,10 +542,6 @@ public class TunnelPool {
                 return;
             if (_settings.isInbound() && !_settings.isExploratory())
                 ls = locked_buildNewLeaseSet();
-            if (_lastSelected == cfg) {
-                _lastSelected = null;
-                _lastSelectionPeriod = 0;
-            }
         }
         
         _manager.tunnelFailed();
@@ -644,8 +618,10 @@ public class TunnelPool {
     }
 
     /**
-     * @return true if a fallback tunnel is built
+     * This will build a fallback (zero-hop) tunnel ONLY if
+     * this pool is exploratory, or the settings allow it.
      *
+     * @return true if a fallback tunnel is built
      */
     boolean buildFallback() {
         int quantity = getAdjustedTotalQuantity();
@@ -656,12 +632,12 @@ public class TunnelPool {
         if (usable > 0)
             return false;
 
-        if (_settings.getAllowZeroHop()) {
+        if (_settings.isExploratory() || _settings.getAllowZeroHop()) {
             if (_log.shouldLog(Log.INFO))
                 _log.info(toString() + ": building a fallback tunnel (usable: " + usable + " needed: " + quantity + ")");
             
             // runs inline, since its 0hop
-            _manager.getExecutor().buildTunnel(this, configureNewTunnel(true));
+            _manager.getExecutor().buildTunnel(configureNewTunnel(true));
             return true;
         }
         return false;
@@ -910,8 +886,6 @@ public class TunnelPool {
                 inProgress = _inProgress.size();
             }
             int remainingWanted = (wanted - expireLater) - inProgress;
-            if (allowZeroHop)
-                remainingWanted -= fallback;
 
             int rv = 0;
             int latesttime = 0;
@@ -1131,7 +1105,7 @@ public class TunnelPool {
             int len = settings.getLengthOverride();
             if (len < 0)
                 len = settings.getLength();
-            if (len > 0 && (!settings.isExploratory()) && _context.random().nextBoolean()) {
+            if (len > 0 && (!settings.isExploratory()) && _context.random().nextInt(4) < 3) {  // 75%
                 // look for a tunnel to reuse, if the right length and expiring soon
                 // ignore variance for now.
                 len++;   // us
@@ -1172,8 +1146,8 @@ public class TunnelPool {
         }
 
         PooledTunnelCreatorConfig cfg = new PooledTunnelCreatorConfig(_context, peers.size(),
-                                                settings.isInbound(), settings.getDestination());
-        cfg.setTunnelPool(this);
+                                                settings.isInbound(), settings.getDestination(),
+                                                this);
         // peers list is ordered endpoint first, but cfg.getPeer() is ordered gateway first
         for (int i = 0; i < peers.size(); i++) {
             int j = peers.size() - 1 - i;
@@ -1204,7 +1178,6 @@ public class TunnelPool {
      */
     void buildComplete(PooledTunnelCreatorConfig cfg) {
         synchronized (_inProgress) { _inProgress.remove(cfg); }
-        cfg.setTunnelPool(this);
         //_manager.buildComplete(cfg);
     }
     

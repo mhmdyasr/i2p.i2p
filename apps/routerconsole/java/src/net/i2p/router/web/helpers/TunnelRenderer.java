@@ -28,7 +28,7 @@ import net.i2p.stat.RateStat;
  *  For /tunnels.jsp, used by TunnelHelper.
  */
 class TunnelRenderer {
-    private RouterContext _context;
+    private final RouterContext _context;
 
     private static final int DISPLAY_LIMIT = 200;
 
@@ -76,7 +76,7 @@ class TunnelRenderer {
                 dname = DataHelper.escapeHTML(_t(name));
             }
             out.write("<h3 class=\"tabletitle\" id=\"" + b64
-                      + "\" >" + _t("Client tunnels for") + ' ' + dname);
+                      + "\" >" + _t("Client tunnels for {0}", dname));
             if (isLocal) {
                 // links are set to float:right in CSS so they will be displayed in reverse order
                 out.write(" <a href=\"/configtunnels#" + b64 + "\" title=\"" + _t("Configure tunnels for session") + "\">[" + _t("configure") + "]</a>");
@@ -97,7 +97,7 @@ class TunnelRenderer {
                             if (aname == null)
                                 aname = ab64;
                             out.write("<h3 class=\"tabletitle\" id=\"" + ab64
-                                      + "\" >" + _t("Client tunnels for") + ' ' + DataHelper.escapeHTML(_t(aname)));
+                                      + "\" >" + _t("Client tunnels for {0}", DataHelper.escapeHTML(_t(aname))));
                             if (isLocal)
                                 out.write(" <a href=\"/configtunnels#" + b64 + "\" title=\"" + _t("Configure tunnels for session") + "\">[" + _t("configure") + "]</a></h3>\n");
                             else
@@ -115,7 +115,7 @@ class TunnelRenderer {
         if (bwShare > 12) {
         // Don't bother re-indenting
         if (!participating.isEmpty()) {
-            Collections.sort(participating, new TunnelComparator());
+            DataHelper.sort(participating, new TunnelComparator());
             out.write("<table class=\"tunneldisplay tunnels_participating\"><tr><th>" + _t("Receive on") + "</th><th>" + _t("From") + "</th><th>"
                   + _t("Send on") + "</th><th>" + _t("To") + "</th><th>" + _t("Expiration") + "</th>"
                   + "<th>" + _t("Usage") + "</th><th>" + _t("Rate") + "</th><th>" + _t("Role") + "</th></tr>\n");

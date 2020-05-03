@@ -17,21 +17,23 @@ import com.docuverse.identicon.IdenticonRenderer;
 import com.docuverse.identicon.IdenticonUtil;
 import com.docuverse.identicon.NineBlockIdenticonRenderer2;
 
+import net.i2p.I2PAppContext;
 import net.i2p.data.Hash;
 import net.i2p.util.ConvertToHash;
+import net.i2p.util.Log;
 
 
 /**
  * This servlet generates <i>identicon</i> (visual identifier) images ranging
  * from 16x16 to 512x512 in size.
  * 
- * <h3>Supported Image Formats</h3>
+ * <h2>Supported Image Formats</h2>
  * <p>
  * Currently only PNG is supported because <code>javax.imageio</code> package
  * does not come with built-in GIF encoder and PNG is the only remaining
  * reasonable format.
  * </p>
- * <h3>Initialization Parameters:</h3>
+ * <h2>Initialization Parameters:</h2>
  * <blockquote>
  * <dl>
  * <dt>inetSalt</dt>
@@ -42,7 +44,7 @@ import net.i2p.util.ConvertToHash;
  * (Optional)</dd>
  * </dl>
  * </blockquote>
- * <h3>Request ParametersP</h3>
+ * <h2>Request ParametersP</h2>
  * <blockquote>
  * <dl>
  * <dt>code</dt>
@@ -146,12 +148,22 @@ public class IdenticonServlet extends HttpServlet {
 			if (cache == null
 					|| (imageBytes = cache.get(identiconETag)) == null) {
 				ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
-				RenderedImage image = renderer.render(code, size);
+				RenderedImage image;
+				try {
+					image = renderer.render(code, size);
+				} catch (Throwable t) {
+					// java.lang.NoClassDefFoundError: Could not initialize class java.awt.GraphicsEnvironment$LocalGE
+					Log log = I2PAppContext.getGlobalContext().logManager().getLog(IdenticonServlet.class);
+					log.logAlways(Log.WARN, "Identicon render failure: " + t);
+					response.setStatus(403);
+					return;
+				}
 				ImageIO.write(image, IDENTICON_IMAGE_FORMAT, byteOut);
 				imageBytes = byteOut.toByteArray();
 				if (cache != null)
 					cache.add(identiconETag, imageBytes);
 			} else {
+				// FIXME this sends 403 if cached
 				response.setStatus(403);
 				return;
 			}

@@ -232,8 +232,8 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 	String sHostName = null;
 	InetAddress hostAddress = null;
 	String _sTestResults, _sMidBoxTestResult;
-	byte _yTests = NDTConstants.TEST_MID | NDTConstants.TEST_C2S
-			| NDTConstants.TEST_S2C | NDTConstants.TEST_SFW
+	byte _yTests = /* NDTConstants.TEST_MID | */ NDTConstants.TEST_C2S
+			| NDTConstants.TEST_S2C /* | NDTConstants.TEST_SFW */
 			| NDTConstants.TEST_STATUS | NDTConstants.TEST_META;
 	int _iC2sSFWResult = NDTConstants.SFW_NOTTESTED;
 	int _iS2cSFWResult = NDTConstants.SFW_NOTTESTED;
@@ -339,12 +339,6 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 			System.exit(0);
 		}
 		final Tcpbw100 applet = new Tcpbw100(useSSL);
-		frame.addWindowListener(new WindowAdapter() {
-			public void windowClosing(WindowEvent e) {
-				applet.destroy();
-				System.exit(0);
-			}
-		});
 		applet._bIsApplication = true;
 		if (args.length > 1) {
 				applet._sClient = args[1];
@@ -933,14 +927,6 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 		// Add "Options" button
 		_buttonOptions = new JButton(_resBundDisplayMsgs.getString("options")
 				+ "...");
-		_buttonOptions.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				_buttonOptions.setEnabled(false);
-				// call the Options-window create code
-				createOptionsWindow();
-				_buttonOptions.setEnabled(true);
-			}
-		});
 		// If disableOptions is not set, then add button
 		if (getParameter("disableOptions") == null) {
 			buttonsPanel.add(_buttonOptions);
@@ -954,7 +940,9 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 		_chkboxPreferIPv6 = new JCheckBox(
 				_resBundDisplayMsgs.getString("preferIPv6"));
 		// I2P
-		_chkboxPreferIPv6.setSelected(Addresses.isConnectedIPv6());
+		// IPv6 unreliable, only prefer if we don't have a IPv4 address
+		//_chkboxPreferIPv6.setSelected(Addresses.isConnectedIPv6());
+		_chkboxPreferIPv6.setSelected(!Addresses.isConnected());
 		_chkboxPreferIPv6.addActionListener(this);
 		// 2. Conduct default tests?
 		_chkboxDefaultTest = new JCheckBox(
@@ -1126,14 +1114,6 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 			_frameOptions.getContentPane().add("South", buttonsPanel);
 
 			JButton okButton = new JButton(_resBundDisplayMsgs.getString("ok"));
-			okButton.addActionListener(new ActionListener() {
-
-				public void actionPerformed(ActionEvent e) {
-					_frameOptions.toBack();
-					_frameOptions.dispose();
-				}
-
-			});
 
 			// place buttons
 			buttonsPanel.add("West", okButton);
@@ -2589,7 +2569,12 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 		send[0] = _yTests;
 		System.arraycopy(NDTConstants.VERSION.getBytes(), 0, send, 1, NDTConstants.VERSION.length());
 
-		protocolObj.send_json_msg(MessageType.MSG_EXTENDED_LOGIN, send);
+		// I2P - adds tests as "tests" in json
+		// https://github.com/measurement-kit/measurement-kit/blob/master/src/libmeasurement_kit/ndt/messages.cpp
+		//protocolObj.send_json_msg(MessageType.MSG_EXTENDED_LOGIN, send);
+		protocolObj.send_json_login_msg(MessageType.MSG_EXTENDED_LOGIN, send);
+		// SSL in particular will hang here for several minutes
+		ctlSocket.setSoTimeout(30*1000);
 
 		// read the specially crafted data that kicks off the old clients
 		if (protocolObj.readn(msg, 13) != 13) {
@@ -2599,6 +2584,7 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 			try { ctlSocket.close(); } catch (IOException ioe) {}
 			return;
 		}
+		ctlSocket.setSoTimeout(60*1000);
 
 		for (;;) {
 
@@ -3010,7 +2996,7 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 			_resultsTxtPane.append(ex + "\n");
 		}
 		// interpret middlebox test results
-		if ((_yTests & NDTConstants.TEST_MID) == NDTConstants.TEST_MID) {
+		if (_sMidBoxTestResult != null && (_yTests & NDTConstants.TEST_MID) == NDTConstants.TEST_MID) {
 			middleboxResults(_sMidBoxTestResult);
 		}
 
@@ -3354,11 +3340,6 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 					// buffering (older "todo" left as is)
 					JLabel info = new JLabel(
 							_resBundDisplayMsgs.getString("information"));
-					info.addMouseListener(new MouseAdapter() {
-						public void mouseClicked(MouseEvent e) {
-							showBufferedBytesInfo();
-						}
-					});
 					info.setForeground(Color.BLUE);
 					info.setCursor(new Cursor(Cursor.HAND_CURSOR));
 					info.setAlignmentY((float) 0.8);
@@ -3375,12 +3356,6 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 					// buffering (older "todo" left as is)
 					JLabel info = new JLabel(
 							_resBundDisplayMsgs.getString("information"));
-					info.addMouseListener(new MouseAdapter() {
-						public void mouseClicked(MouseEvent e) {
-							showBufferedBytesInfo();
-						}
-
-					});
 					info.setForeground(Color.BLUE);
 					info.setCursor(new Cursor(Cursor.HAND_CURSOR));
 					info.setAlignmentY((float) 0.8);
@@ -4511,7 +4486,7 @@ public class Tcpbw100 extends JApplet implements ActionListener {
 				return Integer.parseInt(msg, radix);
 			}
 		} catch (NumberFormatException nfe) {
-			_log.warn("parse", nfe);
+			_log.warn("parse input: \"" + msg + '"', nfe);
 			return 0;
 		}
 	}

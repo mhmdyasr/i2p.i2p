@@ -25,6 +25,7 @@ import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import net.i2p.I2PAppContext;
+import net.i2p.crypto.EncType;
 import net.i2p.crypto.SessionKeyManager;
 import net.i2p.crypto.TagSetHandle;
 import net.i2p.data.DataHelper;
@@ -102,7 +103,7 @@ public class TransientSessionKeyManager extends SessionKeyManager {
      *
      * This is also the max idle time for an outbound session.
      */
-    private final static long SESSION_LIFETIME_MAX_MS = SESSION_TAG_DURATION_MS + 3 * 60 * 1000;
+    private final static long SESSION_LIFETIME_MAX_MS = SESSION_TAG_DURATION_MS + 2 * 60 * 1000;
 
     /**
      * Time to send more if we are this close to expiration
@@ -154,6 +155,7 @@ public class TransientSessionKeyManager extends SessionKeyManager {
     public static final int DEFAULT_TAGS = 40;
     /** ditto */
     public static final int LOW_THRESHOLD = 30;
+    private static final boolean USE_UNACKED_TAGS = false;
 
     /**
      * The session key manager should only be constructed and accessed through the 
@@ -283,6 +285,8 @@ public class TransientSessionKeyManager extends SessionKeyManager {
      * Retrieve the session key currently associated with encryption to the target.
      * Generates a new session and session key if not previously exising.
      *
+     * @param target public key to which the data should be encrypted, must be ELGAMAL_2048.
+     * @throws IllegalArgumentException on bad target EncType
      * @return non-null
      * @since 0.9
      */
@@ -310,6 +314,9 @@ public class TransientSessionKeyManager extends SessionKeyManager {
      *
      * Racy if called after getCurrentKey() to check for a current session;
      * use getCurrentOrNewKey() in that case.
+     *
+     * @param target public key to which the data should be encrypted, must be ELGAMAL_2048.
+     * @throws IllegalArgumentException on bad target EncType
      */
     @Override
     public void createSession(PublicKey target, SessionKey key) {
@@ -322,6 +329,9 @@ public class TransientSessionKeyManager extends SessionKeyManager {
      *
      */
     private OutboundSession createAndReturnSession(PublicKey target, SessionKey key) {
+        EncType type = target.getType();
+        if (type != EncType.ELGAMAL_2048)
+            throw new IllegalArgumentException("Bad public key type " + type);
         if (_log.shouldLog(Log.INFO))
             _log.info("New OB session, sesskey: " + key + " target: " + toString(target));
         OutboundSession sess = new OutboundSession(_context, _log, target, key);
@@ -770,7 +780,7 @@ public class TransientSessionKeyManager extends SessionKeyManager {
     @Override
     public void renderStatusHTML(Writer out) throws IOException {
         StringBuilder buf = new StringBuilder(1024);
-        buf.append("<h3 class=\"debug_inboundsessions\">Inbound sessions</h3>" +
+        buf.append("<h3 class=\"debug_inboundsessions\">ElGamal Inbound Sessions</h3>" +
                    "<table>");
         Map<SessionKey, Set<TagSet>> inboundSets = getInboundTagSetsBySessionKey();
         int total = 0;
@@ -805,7 +815,7 @@ public class TransientSessionKeyManager extends SessionKeyManager {
            .append("; sessions: ").append(inboundSets.size())
            .append("</th></tr>\n" +
                    "</table>" +
-                   "<h3 class=\"debug_outboundsessions\">Outbound sessions</h3>" +
+                   "<h3 class=\"debug_outboundsessions\">ElGamal Outbound Sessions</h3>" +
                    "<table>");
         total = 0;
         totalSets = 0;
@@ -1124,7 +1134,7 @@ public class TransientSessionKeyManager extends SessionKeyManager {
         public void addTags(TagSet set) {
             _lastUsed = _context.clock().now();
             synchronized (_tagSets) {
-                if (_acked)
+                if (USE_UNACKED_TAGS && _acked)
                     _tagSets.add(set);
                 else
                     _unackedTagSets.add(set);

@@ -12,7 +12,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import net.i2p.crypto.EncType;
 import net.i2p.crypto.SigType;
+import net.i2p.data.Base64;
 import net.i2p.data.Certificate;
 import net.i2p.data.DatabaseEntry;
 import net.i2p.data.DataFormatException;
@@ -25,6 +27,7 @@ import net.i2p.data.i2np.I2NPMessage;
 import net.i2p.kademlia.KBucketSet;
 import net.i2p.router.Job;
 import net.i2p.router.JobImpl;
+import net.i2p.router.LeaseSetKeys;
 import net.i2p.router.OutNetMessage;
 import net.i2p.router.ReplyJob;
 import net.i2p.router.RouterContext;
@@ -295,7 +298,8 @@ abstract class StoreJob extends JobImpl {
         Hash rkey = getContext().routingKeyGenerator().getRoutingKey(key);
         KBucketSet<Hash> ks = _facade.getKBuckets();
         if (ks == null) return new ArrayList<Hash>();
-        return ((FloodfillPeerSelector)_peerSelector).selectFloodfillParticipants(rkey, numClosest, alreadyChecked, ks);
+        List<Hash> rv = ((FloodfillPeerSelector)_peerSelector).selectFloodfillParticipants(rkey, numClosest, alreadyChecked, ks);
+        return rv;
     }
 
     /** limit expiration for direct sends */
@@ -346,7 +350,9 @@ abstract class StoreJob extends JobImpl {
             getContext().statManager().addRateData("netDb.storeLeaseSetSent", 1);
             // if it is an encrypted leaseset...
             if (getContext().keyRing().get(msg.getKey()) != null)
-                sendStoreThroughGarlic(msg, peer, expiration);
+                sendStoreThroughExploratory(msg, peer, expiration);
+            else if (msg.getEntry().getType() == DatabaseEntry.KEY_TYPE_META_LS2)
+                sendWrappedStoreThroughExploratory(msg, peer, expiration);
             else
                 sendStoreThroughClient(msg, peer, expiration);
         } else {
@@ -355,7 +361,7 @@ abstract class StoreJob extends JobImpl {
             if (_connectChecker.canConnect(_connectMask, peer))
                 sendDirect(msg, peer, expiration);
             else
-                sendStoreThroughGarlic(msg, peer, expiration);
+                sendStoreThroughExploratory(msg, peer, expiration);
         }
     }
 
@@ -387,12 +393,13 @@ abstract class StoreJob extends JobImpl {
     }
     
     /**
-     * This is misnamed, it means sending it out through an exploratory tunnel,
+     * Send it out through an exploratory tunnel,
      * with the reply to come back through an exploratory tunnel.
      * There is no garlic encryption added.
      *
+     * @since 0.9.41 renamed from sendStoreThroughGarlic()
      */
-    private void sendStoreThroughGarlic(DatabaseStoreMessage msg, RouterInfo peer, long expiration) {
+    private void sendStoreThroughExploratory(DatabaseStoreMessage msg, RouterInfo peer, long expiration) {
         long token = 1 + getContext().random().nextLong(I2NPMessage.MAX_ID_VALUE);
         
         Hash to = peer.getIdentity().getHash();
@@ -479,7 +486,8 @@ abstract class StoreJob extends JobImpl {
         TunnelInfo outTunnel = getContext().tunnelManager().selectOutboundTunnel(client, to);
         if (outTunnel != null) {
             I2NPMessage sent;
-
+            LeaseSetKeys lsk = getContext().keyManager().getKeys(client);
+            if (lsk == null || lsk.isSupported(EncType.ELGAMAL_2048)) {
                 // garlic encrypt
                 MessageWrapper.WrappedMessage wm = MessageWrapper.wrap(getContext(), msg, client, peer);
                 if (wm == null) {
@@ -490,7 +498,22 @@ abstract class StoreJob extends JobImpl {
                 }
                 sent = wm.getMessage();
                 _state.addPending(to, wm);
-
+            } else if (lsk.isSupported(EncType.ECIES_X25519)) {
+                // force full ElG for ECIES-only
+                sent = MessageWrapper.wrap(getContext(), msg, peer);
+                if (sent == null) {
+                    if (_log.shouldLog(Log.WARN))
+                        _log.warn("Fail garlic encrypting from: " + client);
+                    fail();
+                    return;
+                }
+                _state.addPending(to);
+            } else {
+                // Above are the only two enc types for now, won't get here.
+                // Send it unencrypted.
+                sent = msg;
+                _state.addPending(to);
+            }
             SendSuccessJob onReply = new SendSuccessJob(getContext(), peer, outTunnel, sent.getMessageSize());
             FailedJob onFail = new FailedJob(getContext(), peer, getContext().clock().now());
             StoreMessageSelector selector = new StoreMessageSelector(getContext(), getJobId(), peer, token, expiration);
@@ -511,6 +534,76 @@ abstract class StoreJob extends JobImpl {
             waiter.getTiming().setStartAfter(getContext().clock().now() + 3*1000);
             getContext().jobQueue().addJob(waiter);
             //fail();
+        }
+    }
+    
+    /**
+     * Send a leaseset store message out an exploratory tunnel,
+     * with the reply to come back through a exploratory tunnel.
+     * Stores are garlic encrypted to hide the identity from the OBEP.
+     *
+     * Only for Meta LS2, for now.
+     *
+     * @param msg must contain a leaseset
+     * @since 0.9.41
+     */
+    private void sendWrappedStoreThroughExploratory(DatabaseStoreMessage msg, RouterInfo peer, long expiration) {
+        long token = 1 + getContext().random().nextLong(I2NPMessage.MAX_ID_VALUE);
+        Hash to = peer.getIdentity().getHash();
+        TunnelInfo replyTunnel = getContext().tunnelManager().selectInboundExploratoryTunnel(to);
+        if (replyTunnel == null) {
+            if (_log.shouldLog(Log.WARN))
+                _log.warn("No inbound expl. tunnels for reply - delaying...");
+            // continueSending() above did an addPending() so remove it here.
+            // This means we will skip the peer next time, can't be helped for now
+            // without modding StoreState
+            _state.replyTimeout(to);
+            Job waiter = new WaitJob(getContext());
+            waiter.getTiming().setStartAfter(getContext().clock().now() + 3*1000);
+            getContext().jobQueue().addJob(waiter);
+            return;
+        }
+        TunnelId replyTunnelId = replyTunnel.getReceiveTunnelId(0);
+        msg.setReplyToken(token);
+        msg.setReplyTunnel(replyTunnelId);
+        msg.setReplyGateway(replyTunnel.getPeer(0));
+
+        if (_log.shouldLog(Log.DEBUG))
+            _log.debug(getJobId() + ": send(dbStore) w/ token expected " + token);
+
+        TunnelInfo outTunnel = getContext().tunnelManager().selectOutboundExploratoryTunnel(to);
+        if (outTunnel != null) {
+            I2NPMessage sent;
+            // garlic encrypt using router SKM
+            MessageWrapper.WrappedMessage wm = MessageWrapper.wrap(getContext(), msg, null, peer);
+            if (wm == null) {
+                if (_log.shouldLog(Log.WARN))
+                    _log.warn("Fail garlic encrypting");
+                fail();
+                return;
+            }
+            sent = wm.getMessage();
+            _state.addPending(to, wm);
+
+            SendSuccessJob onReply = new SendSuccessJob(getContext(), peer, outTunnel, sent.getMessageSize());
+            FailedJob onFail = new FailedJob(getContext(), peer, getContext().clock().now());
+            StoreMessageSelector selector = new StoreMessageSelector(getContext(), getJobId(), peer, token, expiration);
+    
+            if (_log.shouldLog(Log.DEBUG)) {
+                _log.debug(getJobId() + ": sending encrypted store to " + peer.getIdentity().getHash() + " through " + outTunnel + ": " + sent);
+            }
+            getContext().messageRegistry().registerPending(selector, onReply, onFail);
+            getContext().tunnelDispatcher().dispatchOutbound(sent, outTunnel.getSendTunnelId(0), null, to);
+        } else {
+            if (_log.shouldLog(Log.WARN))
+                _log.warn("No outbound expl. tunnels to send a dbStore out - delaying...");
+            // continueSending() above did an addPending() so remove it here.
+            // This means we will skip the peer next time, can't be helped for now
+            // without modding StoreState
+            _state.replyTimeout(to);
+            Job waiter = new WaitJob(getContext());
+            waiter.getTiming().setStartAfter(getContext().clock().now() + 3*1000);
+            getContext().jobQueue().addJob(waiter);
         }
     }
     

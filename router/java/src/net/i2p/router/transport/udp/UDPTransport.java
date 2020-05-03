@@ -9,17 +9,18 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Vector;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import net.i2p.crypto.HMACGenerator;
 import net.i2p.crypto.SigType;
 import net.i2p.data.DatabaseEntry;
 import net.i2p.data.DataHelper;
@@ -51,6 +52,7 @@ import net.i2p.util.Log;
 import net.i2p.util.OrderedProperties;
 import net.i2p.util.SimpleTimer;
 import net.i2p.util.SimpleTimer2;
+import net.i2p.util.SystemVersion;
 import net.i2p.util.VersionComparator;
 
 /**
@@ -86,6 +88,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
     private long _introducersSelectedOn;
     private long _lastInboundReceivedOn;
     private final DHSessionKeyBuilder.Factory _dhFactory;
+    private final SSUHMACGenerator _hmac;
     private int _mtu;
     private int _mtu_ipv6;
     private boolean _mismatchLogged;
@@ -116,9 +119,9 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
     private volatile long _expireTimeout;
 
     /** last report from a peer of our IP */
-    private Hash _lastFrom;
-    private byte[] _lastOurIP;
-    private int _lastOurPort;
+    private Hash _lastFromv4, _lastFromv6;
+    private byte[] _lastOurIPv4, _lastOurIPv6;
+    private int _lastOurPortv4, _lastOurPortv6;
     /** since we don't publish our IP/port if introduced anymore, we need
         to store it somewhere. */
     private RouterAddress _currentOurV4Address;
@@ -165,6 +168,8 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
     public static final String PROP_IP= "i2np.lastIP";
     public static final String PROP_IP_CHANGE = "i2np.lastIPChange";
     public static final String PROP_LAPTOP_MODE = "i2np.laptopMode";
+    /** @since 0.9.43 */
+    public static final String PROP_IPV6 = "i2np.lastIPv6";
 
     /** do we require introducers, regardless of our status? */
     public static final String PROP_FORCE_INTRODUCERS = "i2np.udp.forceIntroducers";
@@ -230,6 +235,42 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
      */
     private static final String MIN_V6_PEER_TEST_VERSION = "0.9.27";
 
+    // various state bitmaps
+
+    private static final Set<Status> STATUS_IPV4_FW =    EnumSet.of(Status.DIFFERENT,
+                                                                    Status.REJECT_UNSOLICITED,
+                                                                    Status.IPV4_FIREWALLED_IPV6_OK,
+                                                                    Status.IPV4_SNAT_IPV6_OK,
+                                                                    Status.IPV4_OK_IPV6_FIREWALLED);
+
+    private static final Set<Status> STATUS_IPV6_FW =    EnumSet.of(Status.IPV4_OK_IPV6_FIREWALLED,
+                                                                    Status.IPV4_UNKNOWN_IPV6_FIREWALLED,
+                                                                    Status.IPV4_DISABLED_IPV6_FIREWALLED);
+
+    private static final Set<Status> STATUS_IPV6_FW_2 =  EnumSet.of(Status.IPV4_OK_IPV6_FIREWALLED,
+                                                                    Status.IPV4_UNKNOWN_IPV6_FIREWALLED,
+                                                                    Status.IPV4_DISABLED_IPV6_FIREWALLED,
+                                                                    Status.DIFFERENT,
+                                                                    Status.REJECT_UNSOLICITED);
+
+    private static final Set<Status> STATUS_IPV6_OK =    EnumSet.of(Status.OK,
+                                                                    Status.IPV4_UNKNOWN_IPV6_OK,
+                                                                    Status.IPV4_FIREWALLED_IPV6_OK,
+                                                                    Status.IPV4_DISABLED_IPV6_OK,
+                                                                    Status.IPV4_SNAT_IPV6_OK);
+
+    private static final Set<Status> STATUS_NO_RETEST =  EnumSet.of(Status.OK,
+                                                                    Status.IPV4_OK_IPV6_UNKNOWN,
+                                                                    Status.IPV4_OK_IPV6_FIREWALLED,
+                                                                    Status.IPV4_DISABLED_IPV6_OK,
+                                                                    Status.IPV4_DISABLED_IPV6_UNKNOWN,
+                                                                    Status.IPV4_DISABLED_IPV6_FIREWALLED,
+                                                                    Status.DISCONNECTED);
+
+    private static final Set<Status> STATUS_NEED_INTRO = EnumSet.of(Status.REJECT_UNSOLICITED,
+                                                                    Status.IPV4_FIREWALLED_IPV6_OK,
+                                                                    Status.IPV4_FIREWALLED_IPV6_UNKNOWN);
+
 
     public UDPTransport(RouterContext ctx, DHSessionKeyBuilder.Factory dh) {
         super(ctx);
@@ -271,6 +312,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
         _introManager = new IntroductionManager(_context, this);
         _introducersSelectedOn = -1;
         _lastInboundReceivedOn = -1;
+        _hmac = new SSUHMACGenerator();
         _mtu = PeerState.LARGE_MTU;
         _mtu_ipv6 = PeerState.MIN_IPV6_MTU;
         setupPort();
@@ -539,24 +581,28 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
         // REA param is false;
         // TransportManager.startListening() calls router.rebuildRouterInfo()
         if (newPort > 0 && bindToAddrs.isEmpty()) {
+            boolean hasv6 = false;
             for (InetAddress ia : getSavedLocalAddresses()) {
                 // Discovered or configured addresses are presumed good at the start.
                 // when externalAddressReceived() was called with SOURCE_INTERFACE,
                 // isAlive() was false, so setReachabilityStatus() was not called
-                // TODO should we set both to unknown and wait for an inbound v6 conn,
-                // since there's no v6 testing?
                 if (ia.getAddress().length == 16) {
-                    // FIXME we need to check and time out after an hour of no inbound ipv6,
-                    // change to firewalled maybe? but we don't have any test to restore
-                    // a v6 address after it's removed.
-                    _lastInboundIPv6 = _context.clock().now();
-                    if (!isIPv6Firewalled())
+                    // only call REA for one v6 address
+                    if (hasv6)
+                        continue;
+                    hasv6 = true;
+                    if (isIPv6Firewalled() || _context.getBooleanProperty(PROP_IPV6_FIREWALLED)) {
+                        setReachabilityStatus(Status.IPV4_UNKNOWN_IPV6_FIREWALLED, true);
+                    } else {
+                        _lastInboundIPv6 = _context.clock().now();
                         setReachabilityStatus(Status.IPV4_UNKNOWN_IPV6_OK, true);
+                        rebuildExternalAddress(ia.getHostAddress(), newPort, false);
+                    }
                 } else {
                     if (!isIPv4Firewalled())
                         setReachabilityStatus(Status.IPV4_OK_IPV6_UNKNOWN);
+                    rebuildExternalAddress(ia.getHostAddress(), newPort, false);
                 }
-                rebuildExternalAddress(ia.getHostAddress(), newPort, false);
             }
         } else if (newPort > 0 && !bindToAddrs.isEmpty()) {
             for (InetAddress ia : bindToAddrs) {
@@ -586,6 +632,12 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
     }
     
     public synchronized void shutdown() {
+        if (_haveIPv6Address) {
+            boolean fwOld = _context.getBooleanProperty(PROP_IPV6_FIREWALLED);
+            boolean fwNew = STATUS_IPV6_FW.contains(_reachabilityStatus);
+            if (fwOld != fwNew)
+                _context.router().saveConfig(PROP_IPV6_FIREWALLED, Boolean.toString(fwNew));
+        }
         destroyAll();
         for (UDPEndpoint endpoint : _endpoints) {
             endpoint.shutdown();
@@ -613,6 +665,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
         UDPPacket.clearCache();
         UDPAddress.clearCache();
         _lastInboundIPv6 = 0;
+        _hmac.clearCache();
     }
 
     /**
@@ -868,8 +921,8 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                 if (!isIPv4Firewalled())
                     setReachabilityStatus(Status.IPV4_OK_IPV6_UNKNOWN);
             } else if (ip.length == 16) {
-                // TODO should we set both to unknown and wait for an inbound v6 conn,
-                // since there's no v6 testing?
+                // TODO if we start periodically scanning our interfaces (we don't now),
+                // this will set non-firewalled every time our IPv6 address changes
                 if (!isIPv6Firewalled())
                     setReachabilityStatus(Status.IPV4_UNKNOWN_IPV6_OK, true);
             }
@@ -909,21 +962,22 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
      *   - This gets harder if and when we publish multiple addresses, or IPv6
      * 
      * @param from Hash of inbound destination
-     * @param ourIP publicly routable IPv4 only
+     * @param ourIP publicly routable IPv4 or IPv6 only, non-null
      * @param ourPort &gt;= 1024
      */
     void externalAddressReceived(Hash from, byte ourIP[], int ourPort) {
         boolean isValid = isValid(ourIP) &&
                           TransportUtil.isValidPort(ourPort);
         boolean explicitSpecified = explicitAddressSpecified();
-        boolean inboundRecent = _lastInboundReceivedOn + ALLOW_IP_CHANGE_INTERVAL > System.currentTimeMillis();
+        boolean inboundRecent;
+        if (ourIP.length == 4)
+            inboundRecent = _lastInboundReceivedOn + ALLOW_IP_CHANGE_INTERVAL > System.currentTimeMillis();
+        else
+            inboundRecent = _lastInboundIPv6 + ALLOW_IP_CHANGE_INTERVAL > _context.clock().now();
         if (_log.shouldLog(Log.INFO))
             _log.info("External address received: " + Addresses.toString(ourIP, ourPort) + " from " 
                       + from + ", isValid? " + isValid + ", explicitSpecified? " + explicitSpecified 
                       + ", receivedInboundRecent? " + inboundRecent + " status " + _reachabilityStatus);
-        if (ourIP.length != 4) {
-            return;
-        }
         
         if (explicitSpecified) 
             return;
@@ -933,43 +987,63 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
         
         if (!isValid) {
             // ignore them 
-            if (_log.shouldLog(Log.ERROR))
-                _log.error("The router " + from + " told us we have an invalid IP - " 
-                           + Addresses.toString(ourIP, ourPort) + ".  Lets throw tomatoes at them");
-            markUnreachable(from);
+            // ticket #2467 natted to an invalid port
+            // if the port is the only issue, don't call markUnreachable()
+            if (ourPort < 1024 || ourPort > 65535 || !isValid(ourIP)) {
+                if (_log.shouldWarn())
+                    _log.warn("The router " + from + " told us we have an invalid IP:port " 
+                               + Addresses.toString(ourIP, ourPort));
+                markUnreachable(from);
+            } else {
+                _log.logAlways(Log.WARN, "The router " + from + " told us we have an invalid port " 
+                                         + ourPort
+                                         + ", check NAT/firewall configuration, the IANA recommended dynamic outside port range is 49152-65535");
+            }
             //_context.banlist().banlistRouter(from, "They said we had an invalid IP", STYLE);
             return;
         }
 
-        RouterAddress addr = getCurrentExternalAddress(false);
+        RouterAddress addr = getCurrentExternalAddress(ourIP.length == 16);
         if (inboundRecent && addr != null && addr.getPort() > 0 && addr.getHost() != null) {
             // use OS clock since its an ordering thing, not a time thing
             // Note that this fails us if we switch from one IP to a second, then back to the first,
             // as some routers still have the first IP and will successfully connect,
             // leaving us thinking the second IP is still good.
-            if (_log.shouldLog(Log.INFO))
-                _log.info("Ignoring IP address suggestion, since we have received an inbound con recently");
+            if (_log.shouldDebug())
+                _log.debug("Ignoring IP address suggestion, since we have received an inbound con recently");
         } else {
             // New IP
             boolean changeIt = false;
             synchronized(this) {
-                if (from.equals(_lastFrom) || !eq(_lastOurIP, _lastOurPort, ourIP, ourPort)) {
-                    _lastFrom = from;
-                    _lastOurIP = ourIP;
-                    _lastOurPort = ourPort;
-                    if (_log.shouldLog(Log.INFO))
-                        _log.info("The router " + from + " told us we have a new IP - " 
-                                  + Addresses.toString(ourIP, ourPort) + ".  Wait until somebody else tells us the same thing.");
+                if (ourIP.length == 4) {
+                    if (from.equals(_lastFromv4) || !eq(_lastOurIPv4, _lastOurPortv4, ourIP, ourPort)) {
+                        if (_log.shouldLog(Log.INFO))
+                            _log.info("The router " + from + " told us we have a new IP - " 
+                                      + Addresses.toString(ourIP, ourPort) + ".  Wait until somebody else tells us the same thing.");
+                    } else {
+                        changeIt = true;
+                    }
+                    _lastFromv4 = from;
+                    _lastOurIPv4 = ourIP;
+                    _lastOurPortv4 = ourPort;
+                } else if (ourIP.length == 16) {
+                    if (from.equals(_lastFromv6) || !eq(_lastOurIPv6, _lastOurPortv6, ourIP, ourPort)) {
+                        if (_log.shouldLog(Log.INFO))
+                            _log.info("The router " + from + " told us we have a new IP - " 
+                                      + Addresses.toString(ourIP, ourPort) + ".  Wait until somebody else tells us the same thing.");
+                    } else {
+                        changeIt = true;
+                    }
+                    _lastFromv6 = from;
+                    _lastOurIPv6 = ourIP;
+                    _lastOurPortv6 = ourPort;
                 } else {
-                    _lastFrom = from;
-                    _lastOurIP = ourIP;
-                    _lastOurPort = ourPort;
-                    changeIt = true;
+                    return;
                 }
             }
             if (changeIt) {
                 if (_log.shouldLog(Log.INFO))
-                    _log.info(from + " and " + _lastFrom + " agree we have a new IP - " 
+                    _log.info(from + " and another peer agree we have the IP " 
                               + Addresses.toString(ourIP, ourPort) + ".  Changing address.");
                 changeAddress(ourIP, ourPort);
             }
@@ -984,6 +1058,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
      * @param ourIP MUST have been previously validated with isValid()
      *              IPv4 or IPv6 OK
      * @param ourPort &gt;= 1024 or 0 for no change
+     * @return true if updated
      */
     private boolean changeAddress(byte ourIP[], int ourPort) {
         // this defaults to true when we are firewalled and false otherwise.
@@ -998,8 +1073,8 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
             byte[] externalListenHost = current != null ? current.getIP() : null;
             int externalListenPort = current != null ? current.getPort() : getRequestedPort(isIPv6);
 
-            if (_log.shouldLog(Log.INFO))
-                _log.info("Change address? status = " + _reachabilityStatus +
+            if (_log.shouldDebug())
+                _log.debug("Change address? status = " + _reachabilityStatus +
                       " diff = " + (_context.clock().now() - _reachabilityStatusLastUpdated) +
                       " old = " + Addresses.toString(externalListenHost, externalListenPort) +
                       " new = " + Addresses.toString(ourIP, ourPort));
@@ -1009,16 +1084,61 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
 
                 if (ourPort > 0 &&
                     !eq(externalListenHost, externalListenPort, ourIP, ourPort)) {
+                    boolean rebuild = true;
+                    if (isIPv6) {
+                        // For IPv6, we only accept changes if this is one of our local addresses
+                        Set<String> ipset = Addresses.getAddresses(false, true);
+                        String ipstr = Addresses.toString(ourIP);
+                        if (!ipset.contains(ipstr)) {
+                            if (_log.shouldInfo())
+                                _log.info("New IPv6 address received but not one of our local addresses: " + ipstr, new Exception());
+                            return false;
+                        }
+                        if (STATUS_IPV6_FW_2.contains(_reachabilityStatus)) {
+                            // If we were firewalled before, let's assume we're still firewalled.
+                            // Save the new IP and fire a test
+                            String oldIP = _context.getProperty(PROP_IPV6);
+                            String newIP = Addresses.toString(ourIP);
+                            if (!newIP.equals(oldIP)) {
+                                Map<String, String> changes = new HashMap<String, String>(1);
+                                changes.put(PROP_IPV6, newIP);
+                                _context.router().saveConfig(changes, null);
+                                if (oldIP != null) {
+                                    _context.router().eventLog().addEvent(EventLog.CHANGE_IP, newIP);
+                                }
+                                // save the external address but don't publish it
+                                OrderedProperties localOpts = new OrderedProperties(); 
+                                localOpts.setProperty(UDPAddress.PROP_PORT, String.valueOf(ourPort));
+                                localOpts.setProperty(UDPAddress.PROP_HOST, newIP);
+                                RouterAddress local = new RouterAddress(STYLE, localOpts, DEFAULT_COST);
+                                replaceCurrentExternalAddress(local, true);
+                                if (_log.shouldWarn())
+                                    _log.warn("New IPv6 address, assuming still firewalled [" +
+                                              newIP + "]:" + ourPort, new Exception());
+                            } else {
+                                if (_log.shouldInfo())
+                                    _log.info("Same IPv6 address, assuming still firewalled [" +
+                                              newIP + "]:" + ourPort);
+                                return false;
+                            }
+                            rebuild = false;
+                            fireTest = true;
+                        }
+                    }
+
                     // This prevents us from changing our IP when we are not firewalled
                     //if ( (_reachabilityStatus != CommSystemFacade.STATUS_OK) ||
                     //     (_externalListenHost == null) || (_externalListenPort <= 0) ||
                     //     (_context.clock().now() - _reachabilityStatusLastUpdated > 2*TEST_FREQUENCY) ) {
                         // they told us something different and our tests are either old or failing
+                    if (rebuild) {
                             if (_log.shouldLog(Log.WARN))
                                 _log.warn("Trying to change our external address to " +
                                           Addresses.toString(ourIP, ourPort));
                             RouterAddress newAddr = rebuildExternalAddress(ourIP, ourPort, true);
                             updated = newAddr != null;
+                    }
+
                     //} else {
                     //    // they told us something different, but our tests are recent and positive,
                     //    // so lets test again
@@ -1028,13 +1148,12 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                     //}
                 } else {
                     // matched what we expect
-                    if (_log.shouldLog(Log.INFO))
-                        _log.info("Same address as the current one");
+                    if (_log.shouldDebug())
+                        _log.debug("Same address as the current one");
                 }
         }
 
         if (fireTest) {
-            // always false, commented out above
             _context.statManager().addRateData("udp.addressTestInsteadOfUpdate", 1);
             _testEvent.forceRunImmediately(isIPv6);
         } else if (updated) {
@@ -1043,8 +1162,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
             if (ourIP.length == 4 && !fixedPort)
                 changes.put(PROP_EXTERNAL_PORT, Integer.toString(ourPort));
             // queue a country code lookup of the new IP
-            if (ourIP.length == 4)
-                _context.commSystem().queueLookup(ourIP);
+            _context.commSystem().queueLookup(ourIP);
             // store these for laptop-mode (change ident on restart... or every time... when IP changes)
             // IPV4 ONLY
             String oldIP = _context.getProperty(PROP_IP);
@@ -1070,7 +1188,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                 // laptop mode
                 // For now, only do this at startup
                 if (oldIP != null &&
-                    System.getProperty("wrapper.version") != null &&
+                    SystemVersion.hasWrapper() &&
                     _context.getBooleanProperty(PROP_LAPTOP_MODE) &&
                     now - lastChanged > 10*60*1000 &&
                     _context.router().getUptime() < 10*60*1000) {
@@ -1087,6 +1205,15 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
             } else if (ourIP.length == 4 && !fixedPort) {
                 // save PROP_EXTERNAL_PORT
                 _context.router().saveConfig(changes, null);
+            } else if (ourIP.length == 16) {
+                oldIP = _context.getProperty(PROP_IPV6);
+                if (!newIP.equals(oldIP)) {
+                    changes.put(PROP_IPV6, newIP);
+                    _context.router().saveConfig(changes, null);
+                    if (oldIP != null) {
+                        _context.router().eventLog().addEvent(EventLog.CHANGE_IP, newIP);
+                    }
+                }
             }
             // deadlock thru here ticket #1699
             // this causes duplicate publish, REA() call above calls rebuildRouterInfo
@@ -1129,9 +1256,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
         if (prop != null)
             return Boolean.parseBoolean(prop);
         Status status = getReachabilityStatus();
-        return status != Status.REJECT_UNSOLICITED &&
-               status != Status.IPV4_FIREWALLED_IPV6_OK &&
-               status != Status.IPV4_FIREWALLED_IPV6_UNKNOWN;
+        return !STATUS_NEED_INTRO.contains(status);
     }
 
     /** 
@@ -1276,8 +1401,8 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
      *
      */
     boolean addRemotePeerState(PeerState peer) {
-        if (_log.shouldLog(Log.INFO))
-            _log.info("Add remote peer state: " + peer);
+        if (_log.shouldDebug())
+            _log.debug("Add remote peer state: " + peer);
         synchronized(_addDropLock) {
             return locked_addRemotePeerState(peer);
         }
@@ -1362,13 +1487,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
         synchronized(_rebuildLock) {
             rebuildIfNecessary();
             Status status = getReachabilityStatus();
-            if (status != Status.OK &&
-                status != Status.IPV4_OK_IPV6_UNKNOWN &&
-                status != Status.IPV4_OK_IPV6_FIREWALLED &&
-                status != Status.IPV4_DISABLED_IPV6_OK &&
-                status != Status.IPV4_DISABLED_IPV6_UNKNOWN &&
-                status != Status.IPV4_DISABLED_IPV6_FIREWALLED &&
-                status != Status.DISCONNECTED &&
+            if (!STATUS_NO_RETEST.contains(status) &&
                 _reachabilityStatusUnchanged < 7) {
                 _testEvent.forceRunSoon(peer.isIPv6());
             }
@@ -1473,7 +1592,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
      *  @param shouldBanlist doesn't really, only sets unreachable
      */
     void dropPeer(PeerState peer, boolean shouldBanlist, String why) {
-        if (_log.shouldLog(Log.INFO)) {
+        if (_log.shouldDebug()) {
             long now = _context.clock().now();
             StringBuilder buf = new StringBuilder(4096);
             long timeSinceSend = now - peer.getLastSendTime();
@@ -1517,7 +1636,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                 }
             }
              */
-            _log.info(buf.toString(), new Exception("Dropped by"));
+            _log.debug(buf.toString(), new Exception("Dropped by"));
         }
         synchronized(_addDropLock) {
             locked_dropPeer(peer, shouldBanlist, why);
@@ -1819,7 +1938,11 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                  // (especially when we have an IPv6 address and the increased minimums),
                  // and if UDP is completely blocked we'll still have some connectivity.
                  // TODO After some time, decide that UDP is blocked/broken and return TRANSIENT_FAIL_BID?
-                if (_context.random().nextInt(4) == 0)
+
+                // Even more if hidden.
+                // We'll have very low connection counts, and we don't need peer testing
+                int ratio = _context.router().isHidden() ? 2 : 4;
+                if (_context.random().nextInt(ratio) == 0)
                     return _cachedBid[SLOWEST_BID];
                 else
                     return _cachedBid[SLOW_PREFERRED_BID];
@@ -1876,10 +1999,12 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
         return (pref != null) && "always".equals(pref);
     }
     
-    // We used to have MAX_IDLE_TIME = 5m, but this causes us to drop peers
-    // and lose the old introducer tags, causing introduction fails,
-    // so we keep the max time long to give the introducer keepalive code
-    // in the IntroductionManager a chance to work.
+    /**
+     * We used to have MAX_IDLE_TIME = 5m, but this causes us to drop peers
+     * and lose the old introducer tags, causing introduction fails,
+     * so we keep the max time long to give the introducer keepalive code
+     * in the IntroductionManager a chance to work.
+     */
     public static final int EXPIRE_TIMEOUT = 20*60*1000;
     private static final int MAX_IDLE_TIME = EXPIRE_TIMEOUT;
     public static final int MIN_EXPIRE_TIMEOUT = 165*1000;
@@ -2196,7 +2321,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
 
     private RouterAddress locked_rebuildExternalAddress(String host, int port, boolean allowRebuildRouterInfo) {
         if (_log.shouldDebug())
-            _log.debug("REA4 " + host + ':' + port);
+            _log.debug("REA4 " + host + ' ' + port, new Exception());
         if (_context.router().isHidden())
             return null;
         
@@ -2322,16 +2447,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                 RouterAddress local = new RouterAddress(STYLE, localOpts, DEFAULT_COST);
                 replaceCurrentExternalAddress(local, isIPv6);
             }
-            if (getCurrentAddress(false) != null) {
-                // We must remove current address, otherwise the user will see
-                // "firewalled with inbound NTCP enabled" warning in console.
-                // Remove the IPv4 address only
-                removeAddress(false);
-                // warning, this calls back into us with allowRebuildRouterInfo = false,
-                // via CSFI.createAddresses->TM.getAddresses()->updateAddress()->REA
-                if (allowRebuildRouterInfo)
-                    _context.router().rebuildRouterInfo();
-            }
+            removeExternalAddress(isIPv6, allowRebuildRouterInfo);
             return null;
         }
     }
@@ -2350,6 +2466,24 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
             _currentOurV6Address = ra;
         else
             _currentOurV4Address = ra;
+    }
+
+    /**
+     *  @since 0.9.43 pulled out of locked_rebuildExternalAddress
+     */
+    private void removeExternalAddress(boolean isIPv6, boolean allowRebuildRouterInfo) {
+        synchronized (_rebuildLock) {
+            if (getCurrentAddress(isIPv6) != null) {
+                // We must remove current address, otherwise the user will see
+                // "firewalled with inbound NTCP enabled" warning in console.
+                // Remove the v4/v6 address only
+                removeAddress(isIPv6);
+                // warning, this calls back into us with allowRebuildRouterInfo = false,
+                // via CSFI.createAddresses->TM.getAddresses()->updateAddress()->REA
+                if (allowRebuildRouterInfo)
+                    _context.router().rebuildRouterInfo();
+            }
+        }
     }
 
     /**
@@ -2551,7 +2685,8 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                 _log.info("Consecutive failure #" + consecutive 
                           + " on " + msg.toString()
                           + " to " + msg.getPeer());
-            if ( (_context.clock().now() - msg.getPeer().getLastSendFullyTime() <= 60*1000) || (consecutive < MAX_CONSECUTIVE_FAILED) ) {
+            if (consecutive < MAX_CONSECUTIVE_FAILED ||
+                _context.clock().now() - msg.getPeer().getLastSendFullyTime() <= 60*1000) {
                 // ok, a few conseutive failures, but we /are/ getting through to them
             } else {
                 _context.statManager().addRateData("udp.dropPeerConsecutiveFailures", consecutive, msg.getPeer().getInactivityTime());
@@ -2709,12 +2844,12 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
 
     /**
      * Return our peer clock skews on this transport.
-     * Vector composed of Long, each element representing a peer skew in seconds.
+     * List composed of Long, each element representing a peer skew in seconds.
      * A positive number means our clock is ahead of theirs.
      */
     @Override
-    public Vector<Long> getClockSkews() {
-        Vector<Long> skews = new Vector<Long>();
+    public List<Long> getClockSkews() {
+        List<Long> skews = new ArrayList<Long>(_peersByIdent.size());
 
         // If our clock is way off, we may not have many (or any) successful connections,
         // so try hard in that case to return good data
@@ -2725,7 +2860,7 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                 continue; // skip old peers
             if (peer.getRTT() > 1250)
                 continue; // Big RTT makes for a poor calculation
-            skews.addElement(Long.valueOf(peer.getClockSkew() / 1000));
+            skews.add(Long.valueOf(peer.getClockSkew() / 1000));
         }
         if (_log.shouldLog(Log.DEBUG))
             _log.debug("UDP transport returning " + skews.size() + " peer clock skews.");
@@ -2746,6 +2881,14 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
      */
     DHSessionKeyBuilder.Factory getDHFactory() {
         return _dhFactory;
+    }
+    
+    /**
+     *  @return the SSU HMAC
+     *  @since 0.9.42
+     */
+    HMACGenerator getHMAC() {
+        return _hmac;
     }
     
     /**
@@ -2865,8 +3008,8 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
                 }
 
             if (!_expireBuffer.isEmpty()) {
-                if (_log.shouldLog(Log.INFO))
-                    _log.info("Expiring " + _expireBuffer.size() + " peers");
+                if (_log.shouldDebug())
+                    _log.debug("Expiring " + _expireBuffer.size() + " peers");
                 for (PeerState peer : _expireBuffer) {
                     sendDestroy(peer);
                     dropPeer(peer, false, "idle too long");
@@ -2955,16 +3098,8 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
             if (status != old) {
                 // for the following transitions ONLY, require two in a row
                 // to prevent thrashing
-                if ((old == Status.OK && (status == Status.DIFFERENT ||
-                                          status == Status.REJECT_UNSOLICITED ||
-                                          status == Status.IPV4_FIREWALLED_IPV6_OK ||
-                                          status == Status.IPV4_SNAT_IPV6_OK ||
-                                          status == Status.IPV4_OK_IPV6_FIREWALLED)) ||
-                    (status == Status.OK && (old == Status.DIFFERENT ||
-                                             old == Status.REJECT_UNSOLICITED ||
-                                             old == Status.IPV4_FIREWALLED_IPV6_OK ||
-                                             old == Status.IPV4_SNAT_IPV6_OK ||
-                                             old == Status.IPV4_OK_IPV6_FIREWALLED))) {
+                if ((old == Status.OK && STATUS_IPV4_FW.contains(status)) ||
+                    (status == Status.OK && STATUS_IPV4_FW.contains(old))) {
                     if (status != _reachabilityStatusPending) {
                         if (_log.shouldLog(Log.WARN))
                             _log.warn("Old status: " + old + " status pending confirmation: " + status +
@@ -2994,8 +3129,20 @@ public class UDPTransport extends TransportImpl implements TimedWeightedPriority
             // Always rebuild when the status changes, even if our address hasn't changed,
             // as rebuildExternalAddress() calls replaceAddress() which calls CSFI.notifyReplaceAddress()
             // which will start up NTCP inbound when we transition to OK.
-            // if (needsRebuild())
+            if (isIPv6) {
+                if (STATUS_IPV6_FW.contains(status)) {
+                    removeExternalAddress(true, true);
+                } else if (STATUS_IPV6_FW.contains(old) &&
+                           STATUS_IPV6_OK.contains(status) &&
+                           _lastOurIPv6 != null &&
+                           !explicitAddressSpecified()){
+                     String addr = Addresses.toString(_lastOurIPv6);
+                     int port = _context.getProperty(PROP_EXTERNAL_PORT, -1);
+                     rebuildExternalAddress(addr, port, true);
+                }
+            } else {
                 rebuildExternalAddress();
+            }
         } else {
             if (_log.shouldLog(Log.INFO))
                 _log.info("Status unchanged: " + _reachabilityStatus +

@@ -58,6 +58,7 @@
             srcdir="./src" 
             debug="true" deprecation="on" source="${javac.version}" target="${javac.version}" 
             includeAntRuntime="false"
+            encoding="UTF-8"
             destdir="./build/obj">
             <compilerarg line="${javac.compilerargs}" />
             <classpath>
@@ -95,6 +96,7 @@
             includes="net/i2p/router/news/*.java"
             debug="true" deprecation="on" source="${javac.version}" target="${javac.version}" 
             includeAntRuntime="false"
+            encoding="UTF-8"
             destdir="./build/obj">
             <compilerarg line="${javac.compilerargs}" />
             <classpath>
@@ -177,6 +179,7 @@
         </exec>
         <javac source="${javac.version}" target="${javac.version}" 
                includeAntRuntime="false"
+               encoding="UTF-8"
                srcdir="build/messages-src" destdir="build/obj">
             <compilerarg line="${javac.compilerargs}" />
         </javac>
@@ -234,6 +237,7 @@
         </exec>
         <javac source="${javac.version}" target="${javac.version}" 
                includeAntRuntime="false"
+               encoding="UTF-8"
                srcdir="build/messages-news-src" destdir="build/obj">
             <compilerarg line="${javac.compilerargs}" />
         </javac>
@@ -253,6 +257,7 @@
         </exec>
         <javac source="${javac.version}" target="${javac.version}" 
                includeAntRuntime="false"
+               encoding="UTF-8"
                srcdir="build/messages-countries-src" destdir="build/obj">
             <compilerarg line="${javac.compilerargs}" />
         </javac>
@@ -513,8 +518,8 @@
         <property name="__class3" value="${__match1}configreseed${__match2}" />
         <property name="__multipart" value="&#10;
        &lt;multipart-config&gt;&#10;
-           &lt;max-file-size&gt;67108864&lt;/max-file-size&gt;&#10;
-           &lt;max-request-size&gt;67108864&lt;/max-request-size&gt;&#10;
+           &lt;max-file-size&gt;134217728&lt;/max-file-size&gt;&#10;
+           &lt;max-request-size&gt;134217728&lt;/max-request-size&gt;&#10;
            &lt;file-size-threshold&gt;262144&lt;/file-size-threshold&gt;&#10;
        &lt;/multipart-config&gt;" />
         <replace file="../jsp/web-out.xml">

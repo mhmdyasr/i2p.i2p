@@ -12,8 +12,11 @@ import java.util.List;
 import java.util.Properties;
 
 import net.i2p.CoreVersion;
+import net.i2p.client.I2PClient;
 import net.i2p.crypto.EncType;
 import net.i2p.crypto.SigType;
+import net.i2p.data.Base64;
+import net.i2p.data.BlindData;
 import net.i2p.data.DatabaseEntry;
 import net.i2p.data.DataHelper;
 import net.i2p.data.Destination;
@@ -24,7 +27,9 @@ import net.i2p.data.LeaseSet2;
 import net.i2p.data.Payload;
 import net.i2p.data.PrivateKey;
 import net.i2p.data.PublicKey;
+import net.i2p.data.SigningPublicKey;
 import net.i2p.data.i2cp.BandwidthLimitsMessage;
+import net.i2p.data.i2cp.BlindingInfoMessage;
 import net.i2p.data.i2cp.CreateLeaseSetMessage;
 import net.i2p.data.i2cp.CreateLeaseSet2Message;
 import net.i2p.data.i2cp.CreateSessionMessage;
@@ -151,6 +156,9 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
             case GetBandwidthLimitsMessage.MESSAGE_TYPE:
                 handleGetBWLimits((GetBandwidthLimitsMessage)message);
                 break;
+            case BlindingInfoMessage.MESSAGE_TYPE:
+                handleBlindingInfo((BlindingInfoMessage)message);
+                break;
             default:
                 if (_log.shouldLog(Log.ERROR))
                     _log.error("Unhandled I2CP type received: " + message.getType());
@@ -218,6 +226,11 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
     private void handleCreateSession(CreateSessionMessage message) {
         SessionConfig in = message.getSessionConfig();
         Destination dest = in.getDestination();
+        if (dest.getEncType() != EncType.ELGAMAL_2048) {
+            // Enc type in key cert, proposal 145, unsupported
+            _runner.disconnectClient("Non-ElGamal encryption type in key certificate unsupported");
+            return;
+        }
         if (in.verifySignature()) {
             if (_log.shouldLog(Log.DEBUG))
                 _log.debug("Signature verified correctly on create session message");
@@ -319,12 +332,17 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
             if (_log.shouldLog(Log.ERROR))
                 _log.error("Session establish failed: code = " + status);
             String msg;
-            if (status == SessionStatusMessage.STATUS_INVALID)
+            if (status == SessionStatusMessage.STATUS_DUP_DEST) {
                 msg = "duplicate destination";
-            else if (status == SessionStatusMessage.STATUS_REFUSED)
+                // not in spec, change to INVALID if we send it
+                // status = SessionStatusMessage.STATUS_INVALID
+            } else if (status == SessionStatusMessage.STATUS_INVALID) {
+                msg = "bad session configuration parameters";
+            } else if (status == SessionStatusMessage.STATUS_REFUSED) {
                 msg = "session limit exceeded";
-            else
+            } else {
                 msg = "unknown error";
+            }
             _runner.disconnectClient(msg);
             return;
         }
@@ -372,8 +390,8 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
             String user = null;
             String pw = null;
             if (props != null) {
-                user = props.getProperty("i2cp.username");
-                pw = props.getProperty("i2cp.password");
+                user = props.getProperty(I2PClient.PROP_USER);
+                pw = props.getProperty(I2PClient.PROP_PW);
             }
             if (user == null || user.length() == 0 || pw == null || pw.length() == 0) {
                 _log.logAlways(Log.WARN, "I2CP authentication failed");
@@ -441,7 +459,27 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
         if (_log.shouldLog(Log.DEBUG))
             _log.debug("handleSendMessage called");
         long beforeDistribute = _context.clock().now();
-        MessageId id = _runner.distributeMessage(message);
+        MessageId id;
+        try {
+            // ClientMessagePool runs OCMOSJ inline
+            // don't let bugs there kill the whole session
+            id = _runner.distributeMessage(message);
+        } catch (Exception e) {
+            _log.error("Error sending message", e);
+            MessageStatusMessage status = new MessageStatusMessage();
+            status.setMessageId(_runner.getNextMessageId());
+            status.setSessionId(sid.getSessionId());
+            status.setSize(0);
+            status.setNonce(message.getNonce()); 
+            status.setStatus(MessageStatusMessage.STATUS_SEND_FAILURE_ROUTER);
+            try {
+                _runner.doSend(status);
+            } catch (I2CPMessageException ime) {
+                if (_log.shouldLog(Log.WARN))
+                    _log.warn("Error writing out the message status message", ime);
+            }
+            return;
+        }
         long timeToDistribute = _context.clock().now() - beforeDistribute;
         // TODO validate session id
         _runner.ackSendMessage(sid, id, message.getNonce());
@@ -550,6 +588,13 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
         Destination dest = cfg.getDestination();
         if (type == DatabaseEntry.KEY_TYPE_ENCRYPTED_LS2) {
             // so we can decrypt it
+            // secret must be set before destination
+            String secret = cfg.getOptions().getProperty("i2cp.leaseSetSecret");
+            if (secret != null) {
+                EncryptedLeaseSet encls = (EncryptedLeaseSet) ls;
+                secret = DataHelper.getUTF8(Base64.decode(secret));
+                encls.setSecret(secret);
+            }
             try {
                 ls.setDestination(dest);
             } catch (RuntimeException re) {
@@ -557,6 +602,15 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
                     _log.error("Error decrypting leaseset from client", re);
                 _runner.disconnectClient(re.toString());
                 return;
+            }
+            // per-client auth
+            // we have to do this before verifySignature()
+            String pk = cfg.getOptions().getProperty("i2cp.leaseSetPrivKey");
+            if (pk != null) {
+                byte[] priv = Base64.decode(pk);
+                PrivateKey privkey = new PrivateKey(EncType.ECIES_X25519, priv);
+                EncryptedLeaseSet encls = (EncryptedLeaseSet) ls;
+                encls.setClientPrivateKey(privkey);
             }
             // we have to do this before checking encryption keys below
             if (!ls.verifySignature()) {
@@ -598,6 +652,8 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
                         _runner.disconnectClient("Private/public crypto key mismatch in LS");
                         return;
                     }
+                    // just register new SPK, don't verify, unused
+                    _context.keyManager().registerKeys(dest, message.getSigningPrivateKey(), message.getPrivateKey());
                 } else {
                     // LS2
                     LeaseSet2 ls2 = (LeaseSet2) ls;
@@ -622,9 +678,9 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
                             return;
                         }
                     }
+                    // just register new SPK, don't verify, unused
+                    _context.keyManager().registerKeys(dest, message.getSigningPrivateKey(), pks);
                 }
-                // just register new SPK, don't verify, unused
-                _context.keyManager().registerKeys(dest, message.getSigningPrivateKey(), message.getPrivateKey());
             } else if (message.getSigningPrivateKey() != null &&
                        !message.getSigningPrivateKey().equals(keys.getRevocationKey())) {
                 // just register new SPK, don't verify, unused
@@ -641,11 +697,6 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
                 if (!ok) {
                     _runner.disconnectClient("Duplicate hash of encrypted LS2");
                     return;
-                }
-                String secret = cfg.getOptions().getProperty("i2cp.leaseSetSecret");
-                if (secret != null) {
-                    EncryptedLeaseSet encls = (EncryptedLeaseSet) ls;
-                    encls.setSecret(secret);
                 }
             }
             if (_log.shouldDebug())
@@ -762,6 +813,8 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
      * Divide router limit by 1.75 for overhead.
      * This could someday give a different answer to each client.
      * But it's not enforced anywhere.
+     *
+     * protected for unit test override
      */
     protected void handleGetBWLimits(GetBandwidthLimitsMessage message) {
         if (_log.shouldLog(Log.INFO))
@@ -777,4 +830,65 @@ class ClientMessageEventListener implements I2CPMessageReader.I2CPMessageEventLi
         }
     }
 
+    /**
+     *
+     * @since 0.9.43
+     */
+    private void handleBlindingInfo(BlindingInfoMessage message) {
+        if (_log.shouldInfo())
+            _log.info("Got Blinding info");
+        BlindData bd = message.getBlindData();
+        if (bd == null) {
+            // hash or hostname lookup? don't support for now
+            if (_log.shouldWarn())
+                _log.warn("Unsupported BlindingInfo type: " + message);
+            return;
+        }
+        SigningPublicKey spk = bd.getUnblindedPubKey();
+        if (spk == null) {
+            // hash or hostname lookup? don't support for now
+            if (_log.shouldWarn())
+                _log.warn("Unsupported BlindingInfo type: " + message);
+            return;
+        }
+        BlindData obd = _context.netDb().getBlindData(spk);
+        if (obd == null) {
+            _context.netDb().setBlindData(bd);
+            if (_log.shouldWarn())
+                _log.warn("New: " + bd);
+        } else {
+            // update if changed
+            PrivateKey okey = obd.getAuthPrivKey();
+            PrivateKey nkey = bd.getAuthPrivKey();
+            String osec = obd.getSecret();
+            String nsec = bd.getSecret();
+            if ((nkey != null && !nkey.equals(okey)) ||
+                (nsec != null && !nsec.equals(osec))) {
+                // don't lose destination
+                if (obd.getDestination() != null && bd.getDestination() == null) {
+                    try {
+                        bd.setDestination(obd.getDestination());
+                    } catch (IllegalArgumentException iae) {
+                        if (_log.shouldWarn())
+                            _log.warn("Dest mismatch: " + obd + bd, iae);
+                        return;
+                    }
+                }
+                _context.netDb().setBlindData(bd);
+                if (_log.shouldWarn())
+                    _log.warn("Updated: " + bd);
+            } else {
+                long oexp = obd.getExpiration();
+                long nexp = bd.getExpiration();
+                if (nexp > oexp) {
+                    obd.setExpiration(nexp);
+                    if (_log.shouldWarn())
+                        _log.warn("Updated expiration: " + obd);
+                } else {
+                    if (_log.shouldWarn())
+                        _log.warn("No change: " + obd);
+                }
+            }
+        }
+    }
 }

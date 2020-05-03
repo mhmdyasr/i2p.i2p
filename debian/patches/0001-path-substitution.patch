@@ -272,8 +272,8 @@ Index: b/installer/resources/wrapper.config
 +wrapper.java.library.path.2=/usr/share/java/lib
  
  # Java Bits.  On applicable platforms, tells the JVM to run in 32 or 64-bit mode.
- wrapper.java.additional.auto_bits=TRUE
-@@ -74,7 +66,7 @@ wrapper.java.additional.auto_bits=TRUE
+ wrapper.java.additional.auto_bits=FALSE
+@@ -74,7 +66,7 @@ wrapper.java.additional.auto_bits=FALSE
  # Java Additional Parameters
  # Numbers must be consecutive (except for stripquotes)
  wrapper.java.additional.1=-DloggerFilenameOverride=logs/log-router-@.txt
@@ -509,7 +509,7 @@ Index: b/installer/resources/locale/po/messages_fr.po
 ===================================================================
 --- a/installer/resources/locale/po/messages_fr.po
 +++ b/installer/resources/locale/po/messages_fr.po
-@@ -188,13 +188,13 @@ msgid "Request a Java thread dump if run
+@@ -189,13 +189,13 @@ msgid "Request a Java thread dump if run
  msgstr "Demander un vidage des fils d’exécution de Java si elle est en cours d’exécution."
  
  #: ../i2prouter:1874
@@ -553,14 +553,14 @@ Index: b/installer/resources/locale/po/messages_sv.po
 ===================================================================
 --- a/installer/resources/locale/po/messages_sv.po
 +++ b/installer/resources/locale/po/messages_sv.po
-@@ -187,13 +187,13 @@ msgid "Request a Java thread dump if run
+@@ -189,13 +189,13 @@ msgid "Request a Java thread dump if run
  msgstr "Fråga efter en Java thread dump vid drift."
  
  #: ../i2prouter:1874
 -msgid "Please edit i2prouter and set the variable RUN_AS_USER"
--msgstr "Var god ändra i2prouter och set variabeln RUN_AS_USER"
+-msgstr "Vänligen ändra i2prouter och set variabeln RUN_AS_USER"
 +msgid "Please edit /etc/default/i2p and set the variable RUN_AS_USER"
-+msgstr "Var god ändra /etc/default/i2p och set variabeln RUN_AS_USER"
++msgstr "Vänligen ändra /etc/default/i2p och set variabeln RUN_AS_USER"
  
  #: ../i2prouter:1879
  msgid "Running I2P as the root user is *not* recommended."

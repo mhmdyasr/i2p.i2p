@@ -413,9 +413,17 @@ h2, h3 {
      background: repeating-linear-gradient(135deg, rgba(255,255,255,0.5) 2px, rgba(240, 240, 255, 0.3) 3px, #fff 5px) #fff;
 }
 
+.panel .tunnelConfig {
+    margin-top: 15px;
+}
+
+th.tableTop {
+    font-size: 115%;
+}
+
 th {
-     background: #eef url(images/header.png) center center repeat-x;
-     background: linear-gradient(to bottom, #fff 50%, rgba(238, 238, 255, 0.2) 50%, #eef 100%) !important;
+     /*background: #eef url(images/header.png) center center repeat-x;*/
+     background: linear-gradient(to bottom, #fff 50%, rgba(238, 238, 255, 0.2) 50%, #eef 100%);
      padding: 6px 5px;
      text-align: left;
      border-top: 1px solid #7778bf;
@@ -481,6 +489,57 @@ td.infohelp {
      margin: 2px 0 2px 5px;
      min-width: 30px;
      display: inline-block;
+}
+
+html body#tunnelEditPage form div.panel table#serverTunnelEdit.tunnelConfig tbody tr th{
+    background: url(images/dropdown.png) #f8f8ff;
+    background-repeat: no-repeat !important;
+    background-position: 1%, 15% !important;
+    padding-left: 30px;
+}
+
+html body#tunnelEditPage form div.panel table#serverTunnelEdit.tunnelConfig tbody tr th:hover {
+    background: url(images/dropdown_hover.png) #f8f8ff;
+    background-repeat: no-repeat !important;
+    background-position: 1%, 15% !important;
+    padding-left: 30px;
+}
+
+table.tunnelConfig th,
+html body#tunnelEditPage form div.panel table#serverTunnelEdit.tunnelConfig tbody tr th[colspan='2'],
+html body#tunnelEditPage form div.panel table#serverTunnelEdit.tunnelConfig tbody tr th[colspan='2'] {
+    background: url(images/dropdown.png) #f8f8ff;
+    background-repeat: no-repeat !important;
+    background-position: .5%, 15% !important;
+    padding-left: 30px;
+}
+
+table.tunnelConfig th:hover,
+html body#tunnelEditPage form div.panel table#clientTunnelEdit.tunnelConfig tbody tr th[colspan='2']:hover,
+html body#tunnelEditPage form div.panel table#serverTunnelEdit.tunnelConfig tbody tr th[colspan='2']:hover {
+    background: url(images/dropdown_hover.png) #f8f8ff;
+    background-repeat: no-repeat !important;
+    background-position: .5%, 15% !important;
+    padding-left: 30px;
+}
+
+.tunnelConfigExpanded {
+    background: url(images/dropdown_active.png) #f8f8ff !important;
+    padding-left: 30px;
+}
+
+.tunnelConfigContracted {
+    background: url(images/dropdown.png) #f8f8ff !important;
+    padding-left: 30px;
+}
+
+.excludeBackgroundImage {
+    background-image: none !important;
+    padding-left: 0px !important;
+}
+
+.tunnelNameLabel {
+    padding-left: 30px !important;
 }
 
 .tunnelProperties {
@@ -621,7 +680,7 @@ td[colspan="2"] > select#profile {
      width: calc(50% - 15px) !important;
 }
 
-#customOptions, #userAgents {
+#userAgents {
      width: calc(100% - 10px) !important;
 }
 
@@ -671,6 +730,8 @@ td#throttle {
 
 #throttler th:last-child, #throttler td:last-child {
      border-right: none;
+     padding-left: 30px;
+     border-bottom: none;
 }
 
 #throttler th {
@@ -689,6 +750,7 @@ td#throttle {
 
 #throttler tr:first-child th {
      border-top: none;
+     padding-left: 30px;
 }
 
 td.blankColumn {
@@ -894,8 +956,12 @@ input.tunnelName, input.tunnelDescriptionText, #userAgents, .freetext.tunnelDesc
 
 /* more space */
 
-.freetext, .tunnelConfig textarea, #customOptions, #userAgents, #hostField  {
+.freetext, .tunnelConfig textarea, #userAgents, #hostField  {
      margin: 5px !important;
+}
+
+#customOptions {
+    margin-top: 15px !important;
 }
 
 #tunnelDepth, #tunnelVariance, #tunnelQuantity, #tunnelBackupQuantity,
@@ -919,7 +985,7 @@ textarea[name="accessList"], #hostField, #localDestination, .authentication {
      height: 30px !important;
 }
 
-#customOptions, #userAgents, #leasesetKey {
+#userAgents, #leasesetKey {
      width: calc(100% - 20px) !important;
 }
 
@@ -1105,6 +1171,7 @@ input[type="text"] + label {
      padding: 4px;
      -moz-user-select: all;
      -webkit-user-select: all;
+     -ms-user-select: all;
      user-select: all;
      border: 1px solid #999daf;
      background: #fafaff;

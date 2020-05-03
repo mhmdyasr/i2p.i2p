@@ -19,6 +19,7 @@ import net.i2p.router.web.NavHelper;
 import net.i2p.router.web.StatSummarizer;
 import net.i2p.router.web.SummaryListener;
 import net.i2p.stat.Rate;
+import net.i2p.util.SystemVersion;
 
 /**
  *  /graphs.jsp, including form, and /graph.jsp
@@ -397,7 +398,7 @@ public class GraphHelper extends FormHandler {
                 _out.write(Integer.toString(times[i]));
                 _out.write('"');
                 if (times[i] == _refreshDelaySeconds)
-                    _out.write(" selected=\"selected\"");
+                    _out.write(HelperBase.SELECTED);
                 _out.write('>');
                 if (times[i] > 0)
                     _out.write(DataHelper.formatDuration2(times[i] * 1000));
@@ -436,11 +437,17 @@ public class GraphHelper extends FormHandler {
     @Override
     public String getAllMessages() {
         if (StatSummarizer.isDisabled(_context)) {
-            addFormError("Graphing not supported with this JVM: " +
-                         System.getProperty("java.vendor") + ' ' +
+            addFormError("Graphing not supported with this JVM or OS");
+            addFormNotice("JVM: " + System.getProperty("java.vendor") + ' ' +
                          System.getProperty("java.version") + " (" +
                          System.getProperty("java.runtime.name") + ' ' +
                          System.getProperty("java.runtime.version") + ')');
+            addFormNotice("OS: " + System.getProperty("os.name") + ' ' +
+                           System.getProperty("os.arch") + ' ' +
+                           System.getProperty("os.version"));
+            if (!SystemVersion.isMac() && !SystemVersion.isWindows())
+                addFormNotice("Installing the fonts-dejavu package and then restarting I2P may resolve the issue");
+            addFormNotice("Check logs for more information");
             if (_context.getProperty(PROP_REFRESH, 0) >= 0) {
                 // force no refresh, save silently
                 _context.router().saveConfig(PROP_REFRESH, "-1");
@@ -479,8 +486,11 @@ public class GraphHelper extends FormHandler {
             changes.put(PROP_EVENTS, Boolean.toString(_showEvents));
             changes.put(PROP_LEGEND, Boolean.toString(_graphHideLegend));
             changes.put(SummaryListener.PROP_PERSISTENT, Boolean.toString(_persistent));
+            boolean warn = _persistent != _context.getBooleanPropertyDefaultTrue(SummaryListener.PROP_PERSISTENT);
             _context.router().saveConfig(changes, null);
             addFormNotice(_t("Graph settings saved"));
+            if (warn)
+                addFormError(_t("Restart required to take effect"));
         }
     }
 

@@ -304,6 +304,7 @@ public class Snark
    * Will not start itself. Caller must call startTorrent() if desired.
    *
    * @throws RuntimeException via fatal()
+   * @throws RouterException via fatalRouter()
    */
   public Snark(I2PSnarkUtil util, String torrent, String ip, int user_port,
         StorageListener slistener, CoordinatorListener clistener,
@@ -321,6 +322,7 @@ public class Snark
    *
    * @param baseFile if null, use rootDir/torrentName; if non-null, use it instead
    * @throws RuntimeException via fatal()
+   * @throws RouterException via fatalRouter()
    * @since 0.9.11
    */
   public Snark(I2PSnarkUtil util, String torrent, String ip, int user_port,
@@ -399,7 +401,7 @@ public class Snark
             fatal("'" + torrent + "' exists,"
                   + " but is not a valid torrent metainfo file."
                   + System.getProperty("line.separator"), ioe);
-                 else
+          else
             fatal("I2PSnark does not support creating and tracking a torrent at the moment");
         /*
             {
@@ -424,7 +426,7 @@ public class Snark
         else
           fatal("Cannot open '" + torrent + "'", ioe);
       } catch (OutOfMemoryError oom) {
-          fatal("ERROR - Out of memory, cannot create torrent " + torrent + ": " + oom.getMessage());
+          fatalRouter("ERROR - Out of memory, cannot create torrent " + torrent + ": " + oom.getMessage(), oom);
       } finally {
           if (in != null)
               try { in.close(); } catch (IOException ioe) {}
@@ -467,7 +469,7 @@ public class Snark
             try { storage.close(); } catch (IOException ioee) {
                 ioee.printStackTrace();
             }
-            fatal("Could not check or create storage", ioe);
+            fatal("Could not check or create files for " + getBaseInfo(), ioe);
           }
       }
 
@@ -490,6 +492,22 @@ public class Snark
   }
 
   /**
+   *  multitorrent, magnet, Used by snark-rpc plugin
+   *
+   *  Will not start itself. Caller must call startTorrent() if desired.
+   *
+   *  @param ignored used to be autostart
+   *  @throws RuntimeException via fatal()
+   *  @throws RouterException via fatalRouter()
+   *  @since 0.8.4, removed in 0.9.36, restored in 0.9.45 with boolean param now ignored
+   */
+  protected Snark(I2PSnarkUtil util, String torrent, byte[] ih, String trackerURL,
+        CompleteListener complistener, PeerCoordinatorSet peerCoordinatorSet,
+        ConnectionAcceptor connectionAcceptor, boolean ignored, String rootDir) {
+      this(util, torrent, ih, trackerURL, complistener, peerCoordinatorSet, connectionAcceptor, rootDir);
+  }
+
+  /**
    *  multitorrent, magnet
    *
    *  Will not start itself. Caller must call startTorrent() if desired.
@@ -498,6 +516,7 @@ public class Snark
    *  @param ih 20-byte info hash
    *  @param trackerURL may be null
    *  @throws RuntimeException via fatal()
+   *  @throws RouterException via fatalRouter()
    *  @since 0.8.4
    */
   public Snark(I2PSnarkUtil util, String torrent, byte[] ih, String trackerURL,
@@ -541,7 +560,12 @@ public class Snark
     rv[9] = snark;
     rv[10] = snark;
     rv[11] = snark;
-    I2PAppContext.getGlobalContext().random().nextBytes(rv, 12, 8);
+    try {
+        I2PAppContext.getGlobalContext().random().nextBytes(rv, 12, 8);
+    } catch (IllegalStateException ise) {
+        // random is shut down
+        throw new RouterException("Router shutdown", ise);
+    }
     return rv;
   }
 
@@ -550,8 +574,11 @@ public class Snark
    * Blocks if tunnel is not yet open.
    *
    * @throws RuntimeException via fatal()
+   * @throws RouterException via fatalRouter()
    */
   public synchronized void startTorrent() {
+      if (!stopped)
+          return;
       starting = true;
       try {
           x_startTorrent();
@@ -563,11 +590,12 @@ public class Snark
 
   private void x_startTorrent() {
     boolean ok = _util.connect();
-    if (!ok) fatal("Unable to connect to I2P");
+    if (!ok)
+        fatalRouter("Unable to connect to I2P", null);
     if (coordinator == null) {
         I2PServerSocket serversocket = _util.getServerSocket();
         if (serversocket == null)
-            fatal("Unable to listen for I2P connections");
+            fatalRouter("Unable to listen for I2P connections", null);
         else {
             Destination d = serversocket.getManager().getSession().getMyDestination();
             if (_log.shouldLog(Log.INFO))
@@ -609,7 +637,7 @@ public class Snark
                  try { storage.close(); } catch (IOException ioee) {
                      ioee.printStackTrace();
                  }
-                 fatal("Could not reopen storage", ioe);
+                 fatal("Could not open file for " + getBaseInfo(), ioe);
              }
         }
         trackerclient.start();
@@ -648,18 +676,22 @@ public class Snark
         // TODO: Cache the config-in-mem to compare vs config-on-disk
         // (needed for auto-save to not double-save in some cases)
         long nowUploaded = getUploaded();
-        boolean changed = storage.isChanged() || nowUploaded != savedUploaded;
+        // If autoStart is enabled, always save the config, so we know
+        // whether to start it up next time
+        boolean changed = storage.isChanged() || nowUploaded != savedUploaded ||
+                          (completeListener != null && completeListener.shouldAutoStart());
         try { 
             storage.close(); 
         } catch (IOException ioe) {
-            System.out.println("Error closing " + torrent);
+            if (_log.shouldWarn())
+                _log.warn("Error closing " + torrent);
             ioe.printStackTrace();
         }
         savedUploaded = nowUploaded;
-        if (changed && completeListener != null)
-            completeListener.updateStatus(this);
-        // TODO should save comments at shutdown even if never started...
+        // SnarkManager.stopAllTorrents() will save comments at shutdown even if never started...
         if (completeListener != null) {
+            if (changed)
+                completeListener.updateStatus(this);
             synchronized(_commentLock) {
                 if (_comments != null) {
                     synchronized(_comments) {
@@ -703,6 +735,19 @@ public class Snark
     public String getBaseName() {
         if (storage != null)
             return storage.getBaseName();
+        return torrent;
+    }
+
+    /**
+     *  @return base name for torrent [filtered version of getMetaInfo.getName()],
+     *          or a fake name if in magnet mode, followed by path info and error message,
+     *          for error logging only
+     *  @since 0.9.44
+     */
+    private String getBaseInfo() {
+        if (storage != null)
+            return storage.getBaseName() + " at " +
+                   storage.getBase() + " - check that device is present and writable";
         return torrent;
     }
 
@@ -1183,21 +1228,18 @@ public class Snark
 
   /**
    * Aborts program abnormally.
+   * @throws RuntimeException always
    */
-  private void fatal(String s)
-  {
+  private void fatal(String s) throws RuntimeException {
     fatal(s, null);
   }
 
   /**
    * Aborts program abnormally.
+   * @throws RuntimeException always
    */
-  private void fatal(String s, Throwable t)
-  {
+  private void fatal(String s, Throwable t) throws RuntimeException {
     _log.error(s, t);
-    //System.err.println("snark: " + s + ((t == null) ? "" : (": " + t)));
-    //if (debug >= INFO && t != null)
-    //  t.printStackTrace();
     stopTorrent();
     if (t != null)
         s += ": " + t;
@@ -1205,6 +1247,29 @@ public class Snark
         completeListener.fatal(this, s);
     throw new RuntimeException(s, t);
   }
+
+  /**
+   * Throws a unique exception class to blame the router that can be caught by SnarkManager
+   * @throws RouterException always
+   * @since 0.9.46
+   */
+  private void fatalRouter(String s, Throwable t) throws RouterException {
+    _log.error(s, t);
+    stopTorrent();
+    if (completeListener != null)
+        completeListener.fatal(this, s);
+    throw new RouterException(s, t);
+  }
+
+  /**
+   * A unique exception class to blame the router that can be caught by SnarkManager
+   * @since 0.9.46
+   */
+  static class RouterException extends RuntimeException {
+      public RouterException(String s) { super(s); }
+      public RouterException(String s, Throwable t) { super(s, t); }
+  }
+
 
   /** CoordinatorListener - this does nothing */
   public void peerChange(PeerCoordinator coordinator, Peer peer)
@@ -1229,6 +1294,8 @@ public class Snark
               baseFile = new File(rootDataDir, base);
           else
               baseFile = new SecureFile(rootDataDir, base);
+          if (baseFile.exists())
+              throw new IOException("Data location already exists: " + baseFile);
           // The following two may throw IOE...
           storage = new Storage(_util, baseFile, metainfo, this, false);
           storage.check();
@@ -1250,7 +1317,7 @@ public class Snark
           }
           // TODO we're still in an inconsistent state, won't work if restarted
           // (PeerState "disconnecting seed that connects to seeds"
-          fatal("Could not create data files", ioe);
+          fatal("Could not create file for " + getBaseInfo(), ioe);
       }
   }
 
@@ -1385,6 +1452,9 @@ public class Snark
     return totalUploaders > limit;
   }
 
+  /**
+   *  Is i2psnark as a whole over its limit?
+   */
   public boolean overUpBWLimit() {
     if (_peerCoordinatorSet == null)
       return false;
@@ -1399,6 +1469,9 @@ public class Snark
     return total > limit;
   }
 
+  /**
+   * Is a particular peer who has this recent download rate (in Bps) over our upstream bandwidth limit?
+   */
   public boolean overUpBWLimit(long total) {
     long limit = 1024l * _util.getMaxUpBW();
     return total > limit;

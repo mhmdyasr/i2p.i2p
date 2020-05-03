@@ -12,6 +12,7 @@ import java.io.OutputStreamWriter;
 import java.security.GeneralSecurityException;
 import java.security.NoSuchAlgorithmException; 
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
@@ -29,7 +30,10 @@ import net.i2p.client.I2PSessionException;
 import net.i2p.client.naming.HostTxtEntry;
 import net.i2p.crypto.Blinding;
 import net.i2p.crypto.DSAEngine;
+import net.i2p.crypto.EncType;
 import net.i2p.crypto.KeyGenerator;
+import net.i2p.crypto.KeyPair;
+import net.i2p.crypto.SigAlgo;
 import net.i2p.crypto.SigType;
 import net.i2p.util.OrderedProperties;
 import net.i2p.util.RandomSource;
@@ -90,18 +94,26 @@ public class PrivateKeyFile {
     public static void main(String args[]) {
         int hashEffort = HASH_EFFORT;
         String stype = null;
+        String etype = null;
         String ttype = null;
         String hostname = null;
         String offline = null;
+        String signer = null;
+        String signername = null;
+        String signaction = null;
         int days = 365;
         int mode = 0;
         boolean error = false;
-        Getopt g = new Getopt("pkf", args, "t:nuxhse:c:a:o:d:r:");
+        Getopt g = new Getopt("pkf", args, "t:nuxhse:c:a:o:d:r:p:b:y:z:");
         int c;
         while ((c = g.getopt()) != -1) {
           switch (c) {
             case 'c':
                 stype = g.getOptarg();
+                break;
+
+            case 'p':
+                etype = g.getOptarg();
                 break;
 
             case 't':
@@ -125,6 +137,18 @@ public class PrivateKeyFile {
                     mode = c;
                 else
                     error = true;
+                break;
+
+            case 'b':
+                signername = g.getOptarg();
+                break;
+
+            case 'y':
+                signer = g.getOptarg();
+                break;
+
+            case 'z':
+                signaction = g.getOptarg();
                 break;
 
             case 'o':
@@ -169,9 +193,26 @@ public class PrivateKeyFile {
             String orig = offline != null ? offline : filearg;
             File f = new File(orig);
             boolean exists = f.exists();
+            if (mode == 'a' && !exists) {
+                throw new I2PException("File for authentication does not exist: " + orig);
+            }
             PrivateKeyFile pkf = new PrivateKeyFile(f, client);
             Destination d;
-            if (stype != null) {
+            if (etype != null && !exists) {
+                // create router.keys.dat format, no support in I2PClient
+                SigType type;
+                if (stype == null) {
+                    type = SigType.EdDSA_SHA512_Ed25519;
+                } else {
+                    type = SigType.parseSigType(stype);
+                    if (type == null)
+                        throw new IllegalArgumentException("Signature type " + stype + " is not supported");
+                }
+                EncType ptype = EncType.parseEncType(etype);
+                if (ptype == null)
+                    throw new IllegalArgumentException("Encryption type " + etype + " is not supported");
+                d = pkf.createIfAbsent(type, ptype);
+            } else if (stype != null) {
                 SigType type = SigType.parseSigType(stype);
                 if (type == null)
                     throw new IllegalArgumentException("Signature type " + stype + " is not supported");
@@ -238,8 +279,25 @@ public class PrivateKeyFile {
                 // addressbook auth
                 OrderedProperties props = new OrderedProperties();
                 HostTxtEntry he = new HostTxtEntry(hostname, d.toBase64(), props);
+                if (signer != null && signername != null && signaction != null) {
+                    File fsigner = new File(signer);
+                    if (!fsigner.exists())
+                        throw new I2PException("Signing file does not exist: " + signer);
+                    if (!signaction.equals(HostTxtEntry.ACTION_ADDSUBDOMAIN))
+                        throw new I2PException("Unsupported action: " + signaction);
+                    if (!hostname.endsWith('.' + signername))
+                        throw new I2PException(hostname + " is not a subdomain of " + signername);
+                    PrivateKeyFile pkf2 = new PrivateKeyFile(fsigner);
+                    props.setProperty(HostTxtEntry.PROP_ACTION, signaction);
+                    props.setProperty(HostTxtEntry.PROP_OLDNAME, signername);
+                    props.setProperty(HostTxtEntry.PROP_OLDDEST, pkf2.getDestination().toBase64());
+                    he.signInner(pkf2.getSigningPrivKey());
+                } else if (signer != null || signername != null || signaction != null) {
+                    usage();
+                    return;
+                }
                 he.sign(pkf.getSigningPrivKey());
-                System.out.println("Addressbook Authentication String:");
+                System.out.println("\nAddressbook Authentication String:");
                 OutputStreamWriter out = new OutputStreamWriter(System.out);
                 he.write(out); 
                 out.flush();
@@ -311,21 +369,49 @@ public class PrivateKeyFile {
 
     private static void usage() {
         System.err.println("Usage: PrivateKeyFile filename (generates if nonexistent, then prints)\n" +
-                           "   \ncertificate options:\n" +
+                           "\ncertificate options:\n" +
                            "      -h                   (generates if nonexistent, adds hashcash cert)\n" +
                            "      -n                   (changes to null cert)\n" +
                            "      -s signwithdestfile  (generates if nonexistent, adds cert signed by 2nd dest)\n" +
                            "      -u                   (changes to unknown cert)\n" +
                            "      -x                   (changes to hidden cert)\n" +
-                           "   \nother options:\n" +
+                           "\nother options:\n" +
                            "      -a example.i2p       (generate addressbook authentication string)\n" +
-                           "      -d days              (specify expiration in days of offline sig, default 365)\n" +
+                           "      -b example.i2p       (hostname of the 2LD dest for signing)\n" +
                            "      -c sigtype           (specify sig type of destination)\n" +
+                           "      -d days              (specify expiration in days of offline sig, default 365)\n" +
                            "      -e effort            (specify HashCash effort instead of default " + HASH_EFFORT + ")\n" +
                            "      -o offlinedestfile   (generate the online key file using the offline key file specified)\n" +
+                           "      -p enctype           (specify enc type of destination)\n" +
                            "      -r sigtype           (specify sig type of transient key, default Ed25519)\n" +
                            "      -t sigtype           (changes to KeyCertificate of the given sig type)\n" +
+                           "      -y 2lddestfile       (sign the authentication string with the 2LD key file specified)\n" +
+                           "      -z signaction        (authentication string command, must be \"addsubdomain\"\n" +
                            "");
+        StringBuilder buf = new StringBuilder(256);
+        buf.append("Available signature types:\n");
+        for (SigType t : EnumSet.allOf(SigType.class)) {
+            if (!t.isAvailable())
+                continue;
+            if (t.getBaseAlgorithm().equals(SigAlgo.RSA))
+                continue;
+            if (t.getCode() == 8)
+                continue;
+            buf.append("      ").append(t).append("\t(code: ").append(t.getCode()).append(')');
+            if (t.getCode() == 0)
+                buf.append(" DEFAULT");
+            buf.append('\n');
+        }
+        buf.append("\nAvailable encryption types:\n");
+        for (EncType t : EnumSet.allOf(EncType.class)) {
+            if (!t.isAvailable())
+                continue;
+            buf.append("      ").append(t).append("\t(code: ").append(t.getCode()).append(')');
+            if (t.getCode() == 0)
+                buf.append(" DEFAULT");
+            buf.append('\n');
+        }
+        System.out.println(buf.toString());
     }
     
     public PrivateKeyFile(String file) {
@@ -411,7 +497,7 @@ public class PrivateKeyFile {
     public Destination createIfAbsent() throws I2PException, IOException, DataFormatException {
         return createIfAbsent(I2PClient.DEFAULT_SIGTYPE);
     }
-    
+
     /**
      *  Create with the specified signature type if nonexistent.
      *
@@ -424,11 +510,12 @@ public class PrivateKeyFile {
         if(!this.file.exists()) {
             OutputStream out = null;
             try {
-                out = new SecureFileOutputStream(this.file);
-                if (this.client != null)
+                if (this.client != null) {
+                    out = new SecureFileOutputStream(this.file);
                     this.client.createDestination(out, type);
-                else
+                } else {
                     write();
+                }
             } finally {
                 if (out != null) {
                     try { out.close(); } catch (IOException ioe) {}
@@ -437,7 +524,70 @@ public class PrivateKeyFile {
         }
         return getDestination();
     }
-    
+
+    /**
+     *  Create with the specified signature and encryption types if nonexistent.
+     *  Private for now, only for router.keys.dat testing.
+     *
+     *  Also reads in the file to get the privKey and signingPrivKey, 
+     *  which aren't available from I2PClient.
+     *
+     *  @since 0.9.42
+     */
+    private Destination createIfAbsent(SigType type, EncType ptype) throws I2PException, IOException, DataFormatException {
+        if(!this.file.exists()) {
+            OutputStream out = null;
+            try {
+                if (this.client != null) {
+                    out = new SecureFileOutputStream(this.file);
+                    // no support for this in I2PClient,
+                    // so we modify code from CreateRouterInfoJob.createRouterInfo()
+                    I2PAppContext ctx = I2PAppContext.getGlobalContext();
+                    KeyPair keypair = ctx.keyGenerator().generatePKIKeys(ptype);
+                    PublicKey pub = keypair.getPublic();
+                    PrivateKey priv = keypair.getPrivate();
+                    SimpleDataStructure signingKeypair[] = ctx.keyGenerator().generateSigningKeys(type);
+                    SigningPublicKey spub = (SigningPublicKey)signingKeypair[0];
+                    SigningPrivateKey spriv = (SigningPrivateKey)signingKeypair[1];
+                    Certificate cert;
+                    if (type != SigType.DSA_SHA1 || ptype != EncType.ELGAMAL_2048) {
+                        // TODO long sig types
+                        if (type.getPubkeyLen() > 128)
+                            throw new UnsupportedOperationException("TODO");
+                        cert = new KeyCertificate(type, ptype);
+                    } else {
+                        cert = Certificate.NULL_CERT;
+                    }
+                    byte[] padding;
+                    int padLen = (SigningPublicKey.KEYSIZE_BYTES - spub.length()) +
+                                 (PublicKey.KEYSIZE_BYTES - pub.length());
+                    if (padLen > 0) {
+                        padding = new byte[padLen];
+                        ctx.random().nextBytes(padding);
+                    } else {
+                        padding = null;
+                    }
+                    pub.writeBytes(out);
+                    if (padding != null)
+                        out.write(padding);
+                    spub.writeBytes(out);
+                    cert.writeBytes(out);
+                    priv.writeBytes(out);
+                    spriv.writeBytes(out);
+                } else {
+                    write();
+                }
+            } catch (GeneralSecurityException gse) {
+                throw new RuntimeException("keygen fail", gse);
+            } finally {
+                if (out != null) {
+                    try { out.close(); } catch (IOException ioe) {}
+                }
+            }
+        }
+        return getDestination();
+    }
+
     /**
      *  If the destination is not set, read it in from the file.
      *  Also sets the local privKey and signingPrivKey.
@@ -627,6 +777,12 @@ public class PrivateKeyFile {
      *  @since 0.9.38
      */
     public boolean isOffline() {
+        try {
+            // call this to force initialization
+            getDestination();
+        } catch (Exception e) {
+            return false;
+        }
         return _offlineSignature != null;
     }
 
@@ -753,9 +909,9 @@ public class PrivateKeyFile {
     @Override
     public String toString() {
         StringBuilder s = new StringBuilder(128);
-        s.append("Dest: ");
+        s.append("Destination: ");
         s.append(this.dest != null ? this.dest.toBase64() : "null");
-        s.append("\nB32: ");
+        s.append("\nB32        : ");
         s.append(this.dest != null ? this.dest.toBase32() : "null");
         if (dest != null) {
             SigningPublicKey spk = dest.getSigningPublicKey();
@@ -763,7 +919,10 @@ public class PrivateKeyFile {
             if (type == SigType.EdDSA_SHA512_Ed25519 ||
                 type == SigType.RedDSA_SHA512_Ed25519) {
                 I2PAppContext ctx = I2PAppContext.getGlobalContext();
-                s.append("\nBlinded B32: ").append(Blinding.encode(ctx, spk, null));
+                s.append("\nBlinded B32: ").append(Blinding.encode(spk));
+                s.append("\n + auth key: ").append(Blinding.encode(spk, false, true));
+                s.append("\n + password: ").append(Blinding.encode(spk, true, false));
+                s.append("\n + auth/pw : ").append(Blinding.encode(spk, true, true));
             }
         }
         s.append("\nContains: ");

@@ -1,5 +1,10 @@
 # Release checklist and process
 
+## Two weeks before
+
+- Review Google Play crash reports, fix any related issues
+
+
 ## One week before
 
 - Announce string freeze on #i2p-dev
@@ -10,7 +15,7 @@
 - Push to Transifex: `tx push -s`
 - Make announcement on Transifex with checkin deadline
 
-- GeoIP: Maxmind update is usually first Tuesday of the month, time accordingly
+- GeoIP: db-ip.com update is usually first of the month, time accordingly
 - installer/resources/makegeoip.sh
 - mtn ci installer/resources/GeoLite2-Country.mmdb.gz
 
@@ -21,12 +26,14 @@
 - Tickets: Check if any blocker or critical tickets for this release remain open;
   get them fixed and closed, or reclassified.
 
-- Review Google Play crash reports, fix any related issues
-
 - Initial review: Review the complete diff from the last release, fix any issues
 
 - Trial Debian build: Build and test a preliminary Debian build
   with 'ant debian' and fix any issues
+
+- Javadoc test: 'ant javadoc' and 'ant mavenCentral.deps'
+  with a recent Oracle JDK (12+), and fix any issues.
+  Oracle JDK will error on things that OpenJDK does not!
 
 
 ## A day or two before
@@ -45,7 +52,7 @@
   - Checkout i2p.www branch
   - Write draft release announcement - see i2p2www/blog/README for instructions
     - Top content should be the same as the news entry
-  - `tx push -s`
+  - `tx push -s -r I2P.website_blog`
   - `mtn ci`
 
 3. Make announcement on Transifex asking for news translation
@@ -98,7 +105,20 @@
 
 5. Copy latest trust list _MTN/monotonerc from website or some other workspace
 
-6. Change revision in:
+6. Verify that no untrusted revisions were inadvertently blessed by a trusted party:
+
+    ```
+    ant revisions
+    ```
+
+7. Review the complete diff from the last release:
+
+    ```
+    mtn diff -r t:i2p-0.9.(xx-1) > out.diff
+    vi out.diff
+    ```
+
+8. Change revision in:
   - `history.txt`
   - `installer/install.xml`
   - `installer/install5.xml`
@@ -106,69 +126,26 @@
   - `router/java/src/net/i2p/router/RouterVersion.java`
     - (change to BUILD = 0 and EXTRA = "")
 
-7. `mtn ci`
+9. `mtn ci`
 
-8. Review the complete diff from the last release:
-
-    ```
-    mtn diff -r t:i2p-0.9.(xx-1) > out.diff
-    vi out.diff
-    ```
-
-9. Verify that no untrusted revisions were inadvertently blessed by a trusted party:
-
-    ```
-    ant revisions
-    ```
 
 ### Build and test
 
-1. `ant release`
+0. Make sure you're using the right JDK
+   `echo $JAVA_HOME` and `java -version`
 
-    > NOTE: These tasks are now automated by `ant release`
-    >
-    > Build and tag:
-    >
-    >     ant pkg
-    >
-    > Create signed update files with:
-    >
-    >     export I2P=~/i2p
-    >     java -cp $I2P/lib/i2p.jar net.i2p.crypto.TrustedUpdate sign i2pupdate.zip i2pupdate.sud /path/to/private.key 0.x.xx
-    >     java -cp $I2P/lib/i2p.jar net.i2p.crypto.TrustedUpdate sign i2pupdate200.zip i2pupdate.su2 /path/to/private.key 0.x.xx
-    >
-    > Verify signed update files with:
-    >
-    >     java -cp $I2P/lib/i2p.jar net.i2p.crypto.TrustedUpdate showversion i2pupdate.sud
-    >     java -cp $I2P/lib/i2p.jar net.i2p.crypto.TrustedUpdate verifysig i2pupdate.sud
-    >
-    > Make the source tarball:
-    >
-    >     Start with a clean checkout mtn -d i2p.mtn co --branch=i2p.i2p i2p-0.x.xx
-    >     Double-check trust list
-    >     tar cjf i2psource-0.x.xx.tar.bz2 --exclude i2p-0.x.xx/_MTN i2p-0.x.xx
-    >     mv i2p-0.x.xx.tar.bz2 i2p.i2p
-    >
-    > Rename some files:
-    >
-    >     mv i2pinstall.exe i2pinstall-0.x.xx.exe
-    >     mv i2pupdate.zip i2pupdate-0.x.xx.zip
-    >
-    > Generate hashes:
-    >
-    >     sha256sum i2p*0.x.xx.*
-    >     sha256sum i2pupdate.sud
-    >     sha256sum i2pupdate.su2
-    >
-    > Generate PGP signatures:
-    >
-    >     gpg -b i2pinstall-0.x xx.exe
-    >     gpg -b i2psource-0.x.xx.tar.bz2
-    >     gpg -b i2pupdate-0.x.xx.zip
-    >     gpg -b i2pupdate.sud
-    >     gpg -b i2pupdate.su2
-    >
-    > (end of tasks automated by 'ant release')
+1. `ant releaseRepack` or `ant releaseWithGeoIPRepack` or `ant releaseWithJbigiRepack`
+
+  - Copy i2pinstall_${release.number}_windows.exe,
+    console.ico, ../lib/izpack/rh.bat, and ../lib/izpack/VersionInfo_template.rc
+    to Windows machine
+  - Edit rh.bat to set the correct version number
+  - Run rh.bat to edit the resources
+  - Sign the windows installer:
+    Open Visual Studio developer prompt
+    signtool sign /debug i2pinstall_${release.number}_windows.exe
+  - GPG sign the signed windows installer: gpg -u keyid -b i2pinstall_${release.number}_windows.exe
+  - sha256sum i2pinstall_${release.number}_windows.exe
 
 2. Now test:
   - Save the output about checksums, sizes, and torrents to a file
@@ -220,6 +197,7 @@
   - PPA maintainer
   - news.xml maintainer
   - backup news.xml maintainer
+  - OSX launcher maintainer
   - website files maintainer
 
 4. Update Trac:
@@ -254,7 +232,8 @@
 1. Upload files to launchpad release (download mirror)
    (see debian-alt/doc/launchpad.txt for instructions)
 
-2. Wait for files to be updated on download server
+2. Wait for files to be updated on download server,
+   including new OSX launcher version.
    Verify at http://download.i2p2.no/releases/
 
 3. Website files to change:
@@ -283,4 +262,8 @@
 
 8. Notify downstream Debian maintainer
 
-9. (if we get back into Tails) Notify Tails that new Debian builds are available
+9. Pull announcement translations:
+  - `tx pull -r I2P.website_blog`
+  Do NOT forget this step!
+  - `./update-existing-po.sh`
+  - `mtn ci i2p2www/translations/ -m "Updated translations"`

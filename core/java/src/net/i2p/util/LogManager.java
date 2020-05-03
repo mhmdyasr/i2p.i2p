@@ -98,6 +98,7 @@ public class LogManager implements Flushable {
     private final ConcurrentHashMap<Object, Log> _logs;
     /** who clears and writes our records */
     private LogWriter _writer;
+    private volatile boolean _shutdown;
 
     /** 
      * default log level for logs that aren't explicitly controlled 
@@ -151,6 +152,7 @@ public class LogManager implements Flushable {
         // In the router context, we have to rotate to a new log file at startup or the logs.jsp
         // page will display the old log.
         if (context.isRouterContext()) {
+            // FIXME don't start thread in constructor
             startLogWriter();
         } else {
             // Only in App Context.
@@ -284,6 +286,18 @@ public class LogManager implements Flushable {
      * massive logging load as a way of throttling logging threads.
      */
     void addRecord(LogRecord record) {
+        if (_shutdown && !SystemVersion.isAndroid()) {
+            // Log to wrapper log, for those very-hard-to-debug problems
+            // that happen after LogManager shutdown
+            if (_context.isRouterContext() ||
+                (_displayOnScreen && _onScreenLimit <= record.getPriority())) {
+                // wrapper logs already do time stamps
+                boolean showDate = !SystemVersion.hasWrapper();
+                System.out.print("(shutdown) " + LogRecordFormatter.formatRecord(this, record, showDate));
+            }
+            return;
+        }
+
         if ((!_context.isRouterContext()) && _writer == null)
             startLogWriter();
 
@@ -331,7 +345,7 @@ public class LogManager implements Flushable {
     /**
      * Do not log here, deadlock of LogWriter via rereadConfig().
      */
-    private void loadConfig() {
+    private synchronized void loadConfig() {
         File cfgFile = _locationFile;
         if (!cfgFile.exists()) {
             if (!_alreadyNoticedMissingConfig) {
@@ -503,7 +517,7 @@ public class LogManager implements Flushable {
             return true;
         
         try {
-            SimpleDateFormat fmt = (SimpleDateFormat) DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM);
+            SimpleDateFormat fmt = (SimpleDateFormat) DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM);
             if (!format.equals(""))
                 fmt.applyPattern(format);
             // the router sets the JVM time zone to UTC but saves the original here so we can get it
@@ -659,7 +673,7 @@ public class LogManager implements Flushable {
     }
 
     /** @return success */
-    public boolean saveConfig() {
+    public synchronized boolean saveConfig() {
         Properties props = createConfig();
         try {
             DataHelper.storeProps(props, _locationFile);
@@ -722,9 +736,13 @@ public class LogManager implements Flushable {
         _format = fmt;
     }
 
+    /**
+     *  Any usage of returned formatter must be synchronized!
+     */
     public SimpleDateFormat getDateFormat() {
         return _dateFormat;
     }
+
     public String getDateFormatPattern() {
         return _dateFormatPattern;
     }
@@ -771,7 +789,8 @@ public class LogManager implements Flushable {
         }
     }
 
-    public void shutdown() {
+    public synchronized void shutdown() {
+        _shutdown = true;
         if (_writer != null) {
             //_log.log(Log.WARN, "Shutting down logger");
             // try to prevent out-of-order logging at shutdown

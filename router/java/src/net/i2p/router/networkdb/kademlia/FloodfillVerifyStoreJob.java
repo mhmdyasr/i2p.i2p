@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import net.i2p.crypto.EncType;
 import net.i2p.data.Certificate;
 import net.i2p.data.DatabaseEntry;
 import net.i2p.data.Destination;
@@ -16,6 +17,7 @@ import net.i2p.data.i2np.DatabaseSearchReplyMessage;
 import net.i2p.data.i2np.DatabaseStoreMessage;
 import net.i2p.data.i2np.I2NPMessage;
 import net.i2p.router.JobImpl;
+import net.i2p.router.LeaseSetKeys;
 import net.i2p.router.MessageSelector;
 import net.i2p.router.ProfileManager;
 import net.i2p.router.ReplyJob;
@@ -54,7 +56,7 @@ class FloodfillVerifyStoreJob extends JobImpl {
     
     /**
      *  Delay a few seconds, then start the verify
-     *  @param client generally the same as key, unless encrypted LS2
+     *  @param client generally the same as key, unless encrypted LS2; non-null
      *  @param published getDate() for RI or LS1, getPublished() for LS2
      *  @param sentTo who to give the credit or blame to, can be null
      */
@@ -103,7 +105,8 @@ class FloodfillVerifyStoreJob extends JobImpl {
 
         boolean isInboundExploratory;
         TunnelInfo replyTunnelInfo;
-        if (_isRouterInfo || getContext().keyRing().get(_key) != null) {
+        if (_isRouterInfo || getContext().keyRing().get(_key) != null ||
+            _type == DatabaseEntry.KEY_TYPE_META_LS2) {
             replyTunnelInfo = getContext().tunnelManager().selectInboundExploratoryTunnel(_target);
             isInboundExploratory = true;
         } else {
@@ -122,10 +125,12 @@ class FloodfillVerifyStoreJob extends JobImpl {
         // to avoid association by the exploratory tunnel OBEP.
         // Unless it is an encrypted leaseset.
         TunnelInfo outTunnel;
-        if (_isRouterInfo || getContext().keyRing().get(_key) != null)
+        if (_isRouterInfo || getContext().keyRing().get(_key) != null ||
+            _type == DatabaseEntry.KEY_TYPE_META_LS2) {
             outTunnel = getContext().tunnelManager().selectOutboundExploratoryTunnel(_target);
-        else
+        } else {
             outTunnel = getContext().tunnelManager().selectOutboundTunnel(_client, _target);
+        }
         if (outTunnel == null) {
             if (_log.shouldLog(Log.WARN))
                 _log.warn("No outbound tunnels to verify a store");
@@ -141,37 +146,73 @@ class FloodfillVerifyStoreJob extends JobImpl {
             _facade.verifyFinished(_key);
             return;
         }
+        boolean supportsElGamal = true;
+        boolean supportsRatchet = false;
         if (DatabaseLookupMessage.supportsEncryptedReplies(peer)) {
             // register the session with the right SKM
             MessageWrapper.OneTimeSession sess;
             if (isInboundExploratory) {
-                sess = MessageWrapper.generateSession(getContext());
+                sess = MessageWrapper.generateSession(getContext(), VERIFY_TIMEOUT);
             } else {
-                sess = MessageWrapper.generateSession(getContext(), _client);
-                if (sess == null) {
-                     if (_log.shouldLog(Log.WARN))
-                         _log.warn("No SKM to reply to");
+                LeaseSetKeys lsk = getContext().keyManager().getKeys(_client);
+                supportsRatchet = lsk != null &&
+                                  lsk.isSupported(EncType.ECIES_X25519) &&
+                                  DatabaseLookupMessage.supportsRatchetReplies(peer);
+                supportsElGamal = lsk != null &&
+                                  lsk.isSupported(EncType.ELGAMAL_2048);
+                if (supportsElGamal || supportsRatchet) {
+                    // garlic encrypt
+                    sess = MessageWrapper.generateSession(getContext(), _client, VERIFY_TIMEOUT, !supportsRatchet);
+                    if (sess == null) {
+                         if (_log.shouldLog(Log.WARN))
+                             _log.warn("No SKM to reply to");
+                        _facade.verifyFinished(_key);
+                        return;
+                    }
+                } else {
+                    // We don't have a compatible way to get a reply,
+                    // skip it for now.
+                     if (_log.shouldWarn())
+                         _log.warn("Skipping store verify for ECIES client " + _client.toBase32());
                     _facade.verifyFinished(_key);
                     return;
                 }
             }
-            if (_log.shouldLog(Log.INFO))
-                _log.info(getJobId() + ": Requesting encrypted reply from " + _target + ' ' + sess.key + ' ' + sess.tag);
-            lookup.setReplySession(sess.key, sess.tag);
+            if (sess.tag != null) {
+                if (_log.shouldInfo())
+                    _log.info(getJobId() + ": Requesting AES reply from " + peer + ' ' + sess.key + ' ' + sess.tag);
+                lookup.setReplySession(sess.key, sess.tag);
+            } else {
+                if (_log.shouldInfo())
+                    _log.info(getJobId() + ": Requesting AEAD reply from " + peer + ' ' + sess.key + ' ' + sess.rtag);
+                lookup.setReplySession(sess.key, sess.rtag);
+            }
         }
         Hash fromKey;
-        if (_isRouterInfo)
-            fromKey = null;
-        else
-            fromKey = _client;
-        _wrappedMessage = MessageWrapper.wrap(getContext(), lookup, fromKey, peer);
-        if (_wrappedMessage == null) {
-             if (_log.shouldLog(Log.WARN))
-                _log.warn("Fail Garlic encrypting");
-            _facade.verifyFinished(_key);
-            return;
+        I2NPMessage sent;
+        if (supportsElGamal) {
+            if (_isRouterInfo)
+                fromKey = null;
+            else
+                fromKey = _client;
+            _wrappedMessage = MessageWrapper.wrap(getContext(), lookup, fromKey, peer);
+            if (_wrappedMessage == null) {
+                 if (_log.shouldLog(Log.WARN))
+                    _log.warn("Fail Garlic encrypting");
+                _facade.verifyFinished(_key);
+                return;
+            }
+            sent = _wrappedMessage.getMessage();
+        } else {
+            // force full ElG for ECIES fromkey
+            sent = MessageWrapper.wrap(getContext(), lookup, peer);
+            if (sent == null) {
+                 if (_log.shouldLog(Log.WARN))
+                    _log.warn("Fail Garlic encrypting");
+                _facade.verifyFinished(_key);
+                return;
+            }
         }
-        I2NPMessage sent = _wrappedMessage.getMessage();
 
         if (_log.shouldLog(Log.INFO))
             _log.info(getJobId() + ": Starting verify (stored " + _key + " to " + _sentTo + "), asking " + _target);

@@ -1,14 +1,11 @@
 <%@page contentType="text/html"%>
 <%@page pageEncoding="UTF-8"%>
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-
 <html><head>
 <%@include file="css.jsi" %>
 <%=intl.title("config service")%>
-<script src="/js/ajax.js" type="text/javascript"></script>
 <%@include file="summaryajax.jsi" %>
-</head><body onload="initAjax()">
-
+</head><body>
 <%@include file="summary.jsi" %>
 <h1><%=intl._t("I2P Service Configuration")%></h1>
 <div class="main" id="config_service">
@@ -29,7 +26,7 @@
      <input type="submit" class="cancel" name="action" value="<%=intl._t("Cancel graceful shutdown")%>" >
  <% } %>
  </div>
- <% if (System.getProperty("wrapper.version") != null) { %>
+ <% if (net.i2p.util.SystemVersion.hasWrapper()) { %>
  <h3 class="ptitle" id="restartrouter"><%=intl._t("Restart the router")%></h3>
  <p class="infohelp">
     <%=intl._t("If you want the router to restart itself after shutting down, you can choose one of the following.")%>
@@ -55,7 +52,7 @@
  </div>
 <%
    }  
-   if ( (System.getProperty("os.name") != null) && (System.getProperty("os.name").startsWith("Win")) ) {
+   if (net.i2p.util.SystemVersion.isWindows()) {
 %>
  <h3 class="ptitle" id="runonstartup"><%=intl._t("Run on startup")%></h3>
  <p class="infohelp">
@@ -63,16 +60,27 @@
     <%=intl._t("If you prefer the command line, you can also run the ")%> <code>install_i2p_service_winnt.bat</code> (<%=intl._t("or")%>
  <code>uninstall_i2p_service_winnt.bat</code>).</p>
  <hr><div class="formaction" id="runonstart">
+<%
+     if (net.i2p.util.SystemVersion.isWindowsService()) {
+%>
+ <input type="submit" name="action" class="cancel" value="<%=intl._t("Don't run I2P on startup")%>" >
+<%   } else { %>
  <input type="submit" name="action" class="accept" value="<%=intl._t("Run I2P on startup")%>" >
- <input type="submit" name="action" class="cancel" value="<%=intl._t("Don't run I2P on startup")%>" ></div>
+<%   } %>
+  </div>
+<%
+     if (net.i2p.util.SystemVersion.isWindowsService()) {
+%>
  <p class="infohelp" id="winfoservice"><b>
     <%=intl._t("Note")%>:</b> <%=intl._t("If you are running I2P as service right now, removing it will shut down your router immediately.")%>
     <%=intl._t("You may want to consider shutting down gracefully, as above, then running uninstall_i2p_service_winnt.bat.")%></p>
- <% } %>
-
+<%
+     }
+   }
+%>
  <h3 class="ptitle" id="servicedebug"><%=intl._t("Debugging")%>&nbsp;<a href="/jobs">[<%=intl._t("View the job queue")%>]</a></h3>
  <p class="infohelp">
-<% if (System.getProperty("wrapper.version") != null) { %>
+<% if (net.i2p.util.SystemVersion.hasWrapper()) { %>
     <%=intl._t("At times, it may be helpful to debug I2P by getting a thread dump. To do so, please select the following option and review the thread dumped to <a href=\"logs.jsp#servicelogs\">wrapper.log</a>.")%>
 <% } else { // hack to make layout work for non-wrapper %>
     &nbsp;
@@ -81,11 +89,12 @@
  <hr>
  <div class="formaction" id="dumpthreads">
  <input type="submit" class="reload" name="action" value="<%=intl._t("Force GC")%>" >
-<% if (System.getProperty("wrapper.version") != null) { %>
+<% if (net.i2p.util.SystemVersion.hasWrapper()) { %>
  <input type="submit" class="download" name="action" value="<%=intl._t("Dump threads")%>" >
 <% } %>
  </div>
 
+<% if (!net.i2p.util.SystemVersion.isService()) { %>
  <h3 class="ptitle" id="browseronstart"><%=intl._t("Launch browser on router startup?")%></h3>
  <p class="infohelp">
     <% String consoleURL = formhandler.getConsoleURL(); %>
@@ -94,4 +103,6 @@
  <hr><div class="formaction" id="browserstart">
  <input type="submit" class="check" name="action" value="<%=intl._t("View console on startup")%>" >
  <input type="submit" class="delete" name="action" value="<%=intl._t("Do not view console on startup")%>" >
-</div></form></div></body></html>
+ </div>
+<% } %>
+</form></div></body></html>

@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import net.i2p.client.I2PClient;
 import net.i2p.crypto.SessionKeyManager;
 import net.i2p.data.DatabaseEntry;
+import net.i2p.data.DataHelper;
 import net.i2p.data.Destination;
 import net.i2p.data.EncryptedLeaseSet;
 import net.i2p.data.Hash;
@@ -47,6 +48,8 @@ import net.i2p.router.Job;
 import net.i2p.router.JobImpl;
 import net.i2p.router.RouterContext;
 import net.i2p.router.crypto.TransientSessionKeyManager;
+import net.i2p.router.crypto.ratchet.RatchetSKM;
+import net.i2p.router.crypto.ratchet.MuxedSKM;
 import net.i2p.util.ConcurrentHashSet;
 import net.i2p.util.I2PThread;
 import net.i2p.util.Log;
@@ -287,7 +290,10 @@ class ClientConnectionRunner {
         return _clientVersion;
     }
 
-    /** current client's sessionkeymanager */
+    /**
+     *  The current client's SessionKeyManager.
+     *  As of 0.9.44, returned implementation varies based on supported encryption types.
+     */
     public SessionKeyManager getSessionKeyManager() { return _sessionKeyManager; }
 
     /**
@@ -544,15 +550,17 @@ class ClientConnectionRunner {
         if (!isPrimary) {
             // all encryption keys must be the same
             for (SessionParams sp : _sessions.values()) {
-                if (!dest.getPublicKey().equals(sp.dest.getPublicKey()))
+                if (!dest.getPublicKey().equals(sp.dest.getPublicKey())) {
+                    _log.error("LS pubkey mismatch");
                     return SessionStatusMessage.STATUS_INVALID;
+                }
             }
         }
         SessionParams sp = new SessionParams(dest, isPrimary);
         sp.config = config;
         SessionParams old = _sessions.putIfAbsent(destHash, sp);
         if (old != null)
-            return SessionStatusMessage.STATUS_INVALID;
+            return SessionStatusMessage.STATUS_DUP_DEST;
         // We process a few options here, but most are handled by the tunnel manager.
         // The ones here can't be changed later.
         Properties opts = config.getOptions();
@@ -560,11 +568,18 @@ class ClientConnectionRunner {
             _dontSendMSM = "none".equals(opts.getProperty(I2PClient.PROP_RELIABILITY, "").toLowerCase(Locale.US));
             _dontSendMSMOnReceive = Boolean.parseBoolean(opts.getProperty(I2PClient.PROP_FAST_RECEIVE));
         }
+
+        // Set up the
         // per-destination session key manager to prevent rather easy correlation
+        // based on the specified encryption types in the config
         if (isPrimary && _sessionKeyManager == null) {
             int tags = TransientSessionKeyManager.DEFAULT_TAGS;
             int thresh = TransientSessionKeyManager.LOW_THRESHOLD;
-            if (opts != null) {
+            boolean hasElg = false;
+            boolean hasEC = false;
+            // router may be null in unit tests, avoid NPEs in ratchet
+            // we won't actually be using any SKM anyway
+            if (opts != null && _context.router() != null) {
                 String ptags = opts.getProperty(PROP_TAGS);
                 if (ptags != null) {
                     try { tags = Integer.parseInt(ptags); } catch (NumberFormatException nfe) {}
@@ -573,8 +588,37 @@ class ClientConnectionRunner {
                 if (pthresh != null) {
                     try { thresh = Integer.parseInt(pthresh); } catch (NumberFormatException nfe) {}
                 }
+                String senc = opts.getProperty("i2cp.leaseSetEncType");
+                if (senc != null) {
+                    String[] senca = DataHelper.split(senc, ",");
+                    for (String sencaa : senca) {
+                        if (sencaa.equals("0"))
+                            hasElg = true;
+                        else if (sencaa.equals("4"))
+                            hasEC = true;
+                    }
+                } else {
+                    hasElg = true;
+                }
+            } else {
+                hasElg = true;
             }
-            _sessionKeyManager = new TransientSessionKeyManager(_context, tags, thresh);
+            if (hasElg) {
+                TransientSessionKeyManager tskm = new TransientSessionKeyManager(_context, tags, thresh);
+                if (hasEC) {
+                    RatchetSKM rskm = new RatchetSKM(_context);
+                    _sessionKeyManager = new MuxedSKM(tskm, rskm);
+                } else {
+                    _sessionKeyManager = tskm;
+                }
+            } else {
+                if (hasEC) {
+                    _sessionKeyManager = new RatchetSKM(_context);
+                } else {
+                    _log.error("No supported encryption types in i2cp.leaseSetEncType for " + dest.toBase32());
+                    return SessionStatusMessage.STATUS_INVALID;
+                }
+            }
         }
         return _manager.destinationEstablished(this, dest);
     }
@@ -608,7 +652,7 @@ class ClientConnectionRunner {
      * called after a new leaseSet is granted by the client, the NetworkDb has been
      * updated.  This takes care of all the LeaseRequestState stuff (including firing any jobs)
      *
-     * @param ls, if encrypted, the encrypted LS, not the decrypted one
+     * @param ls if encrypted, the encrypted LS, not the decrypted one
      */
     void leaseSetCreated(LeaseSet ls) {
         Hash h = ls.getDestination().calculateHash();
@@ -877,8 +921,8 @@ class ClientConnectionRunner {
                     if (! current.getLease(i).getGateway().equals(set.getLease(i).getGateway()))
                         break;
                     if (i == leases - 1) {
-                        if (_log.shouldLog(Log.INFO))
-                            _log.info("Requested leaseSet hasn't changed");
+                        if (_log.shouldDebug())
+                            _log.debug("Requested leaseSet hasn't changed");
                         if (onCreateJob != null)
                             _context.jobQueue().addJob(onCreateJob);
                         return; // no change

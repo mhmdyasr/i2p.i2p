@@ -159,15 +159,16 @@ public final class KeyGenerator {
         BigInteger aalpha = CryptoConstants.elgg.modPow(a, CryptoConstants.elgp);
 
         SimpleDataStructure[] keys = new SimpleDataStructure[2];
-        keys[0] = new PublicKey();
-        keys[1] = new PrivateKey();
 
         // bigInteger.toByteArray returns SIGNED integers, but since they'return positive,
         // signed two's complement is the same as unsigned
 
         try {
-            keys[0].setData(SigUtil.rectify(aalpha, PublicKey.KEYSIZE_BYTES));
-            keys[1].setData(SigUtil.rectify(a, PrivateKey.KEYSIZE_BYTES));
+            PublicKey pub = new PublicKey(SigUtil.rectify(aalpha, PublicKey.KEYSIZE_BYTES));
+            keys[0] = pub;
+            keys[1] = new PrivateKey(EncType.ELGAMAL_2048,
+                                     SigUtil.rectify(a, PrivateKey.KEYSIZE_BYTES),
+                                     pub);
         } catch (InvalidKeyException ike) {
             throw new IllegalArgumentException(ike);
         }
@@ -199,7 +200,7 @@ public final class KeyGenerator {
             byte[] bpub = new byte[32];
             Curve25519.eval(bpub, 0, bpriv, null);
             pub = new PublicKey(type, bpub);
-            priv = new PrivateKey(type, bpriv);
+            priv = new PrivateKey(type, bpriv, pub);
             break;
 
           default:
@@ -471,13 +472,13 @@ public final class KeyGenerator {
         else
             System.out.println(type + " private-to-public test FAILED");
         //System.out.println("privkey " + keys[1]);
-          MessageDigest md = type.getDigestInstance();
+        MessageDigest md = type.getDigestInstance();
         for (int i = 0; i < runs; i++) {
             RandomSource.getInstance().nextBytes(src);
-              md.update(src);
-              byte[] sha = md.digest();
-              SimpleDataStructure hash = type.getHashInstance();
-              hash.setData(sha);
+            md.update(src);
+            byte[] sha = md.digest();
+            SimpleDataStructure hash = type.getHashInstance();
+            hash.setData(sha);
             long start = System.nanoTime();
             Signature sig = DSAEngine.getInstance().sign(src, privkey);
             Signature sig2 = DSAEngine.getInstance().sign(hash, privkey);
@@ -492,16 +493,18 @@ public final class KeyGenerator {
             stime += mid - start;
             vtime += end - mid;
             if (!ok)
-                throw new GeneralSecurityException(type + " V(S(data)) fail");
+                throw new GeneralSecurityException(type + " V(S(data)) fail on run " + i);
             if (!ok2)
-                throw new GeneralSecurityException(type + " V(S(H(data))) fail");
+                throw new GeneralSecurityException(type + " V(S(H(data))) fail on run" + i);
         }
         stime /= 1000*1000;
         vtime /= 1000*1000;
+        // we do two of each per run above
+        int runs2 = runs * 2;
         System.out.println(type + " sign/verify " + runs + " times: " + (vtime+stime) + " ms = " +
-                           (((double) stime) / runs) + " each sign, " +
-                           (((double) vtime) / runs) + " each verify, " +
-                           (((double) (stime + vtime)) / runs) + " s+v");
+                           (((double) stime) / runs2) + " each sign, " +
+                           (((double) vtime) / runs2) + " each verify, " +
+                           (((double) (stime + vtime)) / runs2) + " s+v");
     }
 
 /******

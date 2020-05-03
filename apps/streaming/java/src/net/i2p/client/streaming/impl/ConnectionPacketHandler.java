@@ -28,8 +28,11 @@ class ConnectionPacketHandler {
     private final Log _log;
     private final ByteCache _cache = ByteCache.getInstance(32, 4*1024);
 
-    public static final int MAX_SLOW_START_WINDOW = 24;
+    public static final int MAX_SLOW_START_WINDOW = 64;
     
+    // see tickets 1939 and 2584
+    private static final int IMMEDIATE_ACK_DELAY = 150;
+
     public ConnectionPacketHandler(I2PAppContext context) {
         _context = context;
         _log = context.logManager().getLog(ConnectionPacketHandler.class);
@@ -50,6 +53,7 @@ class ConnectionPacketHandler {
         boolean ok = verifyPacket(packet, con);
         if (!ok) {
             boolean isTooFast = con.getSendStreamId() <= 0;
+            // Apparently an i2pd bug... see verifyPacket()
             if ( (!packet.isFlagSet(Packet.FLAG_RESET)) && (!isTooFast) && (_log.shouldLog(Log.WARN)) )
                 _log.warn("Packet does NOT verify: " + packet + " on " + con);
             packet.releasePayload();
@@ -197,11 +201,14 @@ class ConnectionPacketHandler {
                 // TODO the 250 below _may_ be a big limiter in how fast local "loopback" connections
                 // can go, however if it goes too fast then we start choking which causes
                 // frequent stalls anyway.
-                con.setNextSendTime(_context.clock().now() + 250);
+                // see tickets 1939 and 2584
+                con.setNextSendTime(_context.clock().now() + IMMEDIATE_ACK_DELAY);
             } else {
-                int delay = con.getOptions().getSendAckDelay();
+                int delay;
                 if (packet.isFlagSet(Packet.FLAG_DELAY_REQUESTED)) // delayed ACK requested
                     delay = packet.getOptionalDelay();
+                else
+                    delay = con.getOptions().getSendAckDelay();
                 con.setNextSendTime(delay + _context.clock().now());
                 if (_log.shouldLog(Log.DEBUG))
                     _log.debug("Scheduling ack in " + delay + "ms for received packet " + packet);
@@ -426,9 +433,9 @@ class ConnectionPacketHandler {
 
             _context.statManager().addRateData("stream.trend", trend, newWindowSize);
             
-            if ( (!congested) && (acked > 0) && (numResends <= 0) ) {
-                if (newWindowSize < con.getLastCongestionSeenAt() / 2) {
-                    // Don't make this <= LastCongestion/2 or we'll jump right back to where we were
+            if ( (!congested) && (acked > 0) ) {
+                int ssthresh = con.getSSThresh();
+                if (newWindowSize < ssthresh) {
                     // slow start - exponential growth
                     // grow acked/N times (where N = the slow start factor)
                     // always grow at least 1
@@ -438,10 +445,7 @@ class ConnectionPacketHandler {
                         // as it often leads to a big packet loss (30-50) all at once that
                         // takes quite a while (a minute or more) to recover from,
                         // especially if crypto tags are lost
-                        if (newWindowSize >= MAX_SLOW_START_WINDOW)
-                            newWindowSize++;
-                        else
-                            newWindowSize = Math.min(MAX_SLOW_START_WINDOW, newWindowSize + acked);
+                        newWindowSize = Math.min(ssthresh, newWindowSize + acked);
                     } else if (acked < factor)
                         newWindowSize++;
                     else
@@ -478,8 +482,8 @@ class ConnectionPacketHandler {
             con.setCongestionWindowEnd(newWindowSize + lowest);
                                 
             if (_log.shouldLog(Log.INFO))
-                _log.info("New window size " + newWindowSize + "/" + oldWindow + "/" + con.getOptions().getWindowSize() + " congestionSeenAt: "
-                           + con.getLastCongestionSeenAt() + " (#resends: " + numResends 
+                _log.info("New window size " + newWindowSize + "/" + oldWindow + "/" + con.getOptions().getWindowSize()
+                           + " (#resends: " + numResends 
                            + ") for " + con);
         } else {
             if (_log.shouldLog(Log.DEBUG))
@@ -543,7 +547,7 @@ class ConnectionPacketHandler {
                     }
                 }
             } else {
-                // getting a lot of these - why? mostly/all for acks...
+                // Apparently an i2pd bug...
                 if (con.getSendStreamId() != packet.getReceiveStreamId()) {
                     if (_log.shouldLog(Log.WARN))
                         _log.warn("Packet received with the wrong reply stream id: " 
@@ -567,6 +571,14 @@ class ConnectionPacketHandler {
      */
     private void verifyReset(Packet packet, Connection con) {
         if (con.getReceiveStreamId() == packet.getSendStreamId()) {
+            // check dest. match since 0.9.41
+            Destination d1 = con.getRemotePeer();
+            Destination d2 = packet.getOptionalFrom();
+            if (d1 != null && d2 != null && !d1.equals(d2)) {
+                if (_log.shouldWarn())
+                    _log.warn("Received RST from wrong destination on " + con);
+                return;
+            }
             SigningPublicKey spk = con.getRemoteSPK();
             ByteArray ba = _cache.acquire();
             boolean ok = packet.verifySignature(_context, spk, ba.getData());
@@ -602,6 +614,12 @@ class ConnectionPacketHandler {
      * @throws I2PException if the signature was necessary and it was invalid
      */
     private void verifySignature(Packet packet, Connection con) throws I2PException {
+        // check dest. match since 0.9.41
+        Destination d1 = con.getRemotePeer();
+        Destination d2 = packet.getOptionalFrom();
+        if (d1 != null && d2 != null && !d1.equals(d2)) {
+            throw new I2PException("Received packet from wrong destination on " + con);
+        }
         // verify the signature if necessary
         if (con.getOptions().getRequireFullySigned() || 
             packet.isFlagSet(Packet.FLAG_SYNCHRONIZE | Packet.FLAG_CLOSE | Packet.FLAG_SIGNATURE_INCLUDED)) {

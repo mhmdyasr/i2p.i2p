@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.i2p.data.Hash;
 import net.i2p.data.router.RouterInfo;
-import net.i2p.router.PeerSelectionCriteria;
 import net.i2p.router.Router;
 import net.i2p.router.RouterContext;
 import net.i2p.router.networkdb.kademlia.FloodfillNetworkDatabaseFacade;
@@ -56,6 +55,8 @@ class PeerManager {
      *  Rate contained in the profile, as the Rates must be coalesced.
      */
     private static final long REORGANIZE_TIME_LONG = 351*1000;
+    /** After first two hours of uptime ~= 246 */
+    static final int REORGANIZES_PER_DAY = (int) (24*60*60*1000L / REORGANIZE_TIME_LONG);
     private static final long STORE_TIME = 19*60*60*1000;
     private static final long EXPIRE_AGE = 3*24*60*60*1000;
     
@@ -120,8 +121,10 @@ class PeerManager {
 
         public void run() {
             long start = System.currentTimeMillis();
+            long uptime = _context.router().getUptime();
+            boolean shouldDecay = uptime > 90*60*1000;
             try {
-                _organizer.reorganize(true);
+                _organizer.reorganize(true, shouldDecay);
             } catch (Throwable t) {
                 _log.log(Log.CRIT, "Error evaluating profiles", t);
             }
@@ -139,7 +142,6 @@ class PeerManager {
                     _log.log(Log.CRIT, "Error storing profiles", t);
                 }
             }
-            long uptime = _context.router().getUptime();
             long delay;
             if (orgtime > 1000 || uptime > 2*60*60*1000)
                 delay = REORGANIZE_TIME_LONG;
@@ -152,6 +154,9 @@ class PeerManager {
     }
     
     void storeProfiles() {
+        // Don't overwrite disk profiles when testing
+        if (_context.commSystem().isDummy())
+            return;
         // lock in case shutdown bumps into periodic store
         if (!_storeLock.compareAndSet(false, true))
             return;
@@ -245,6 +250,7 @@ class PeerManager {
                 //_organizer.selectNotFailingPeers(criteria.getMinimumRequired(), exclude, peers);
                 _organizer.selectActiveNotFailingPeers(criteria.getMinimumRequired(), exclude, peers);
                 break;
+/****
             case PeerSelectionCriteria.PURPOSE_TUNNEL:
                 // pull all of the fast ones, regardless of how many we 
                 // want - we'll whittle them down later (40 lines from now)
@@ -260,8 +266,9 @@ class PeerManager {
             case PeerSelectionCriteria.PURPOSE_GARLIC:
                 _organizer.selectHighCapacityPeers(criteria.getMinimumRequired(), exclude, peers);
                 break;
+****/
             default:
-                break;
+                throw new UnsupportedOperationException();
         }
         if (peers.isEmpty()) {
             if (_log.shouldLog(Log.WARN))
@@ -352,5 +359,17 @@ class PeerManager {
             if (peers != null)
                 return Collections.unmodifiableSet(peers);
             return Collections.emptySet();
+    }
+
+    /**
+     *  @param capability case-insensitive
+     *  @return how many
+     *  @since 0.9.45
+     */
+    public int countPeersByCapability(char capability) { 
+            Set<Hash> peers = locked_getPeers(capability);
+            if (peers != null)
+                return peers.size();
+            return 0;
     }
 }

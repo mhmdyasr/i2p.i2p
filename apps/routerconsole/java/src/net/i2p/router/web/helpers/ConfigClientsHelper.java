@@ -1,11 +1,9 @@
 package net.i2p.router.web.helpers;
 
 import java.text.Collator;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
@@ -24,6 +22,7 @@ import net.i2p.router.web.PluginStarter;
 import net.i2p.router.web.RouterConsoleRunner;
 import net.i2p.router.web.WebAppStarter;
 import net.i2p.util.Addresses;
+import net.i2p.util.SystemVersion;
 
 public class ConfigClientsHelper extends HelperBase {
     private String _edit;
@@ -83,7 +82,8 @@ public class ConfigClientsHelper extends HelperBase {
 
     /** @since 0.8.3 */
     public String[] intfcAddresses() {
-        ArrayList<String> al = new ArrayList<String>(Addresses.getAllAddresses());
+        // Exclude IPv6 temporary
+        ArrayList<String> al = new ArrayList<String>(Addresses.getAddresses(true, true, true, false));
         return al.toArray(new String[al.size()]);
     }
 
@@ -138,31 +138,39 @@ public class ConfigClientsHelper extends HelperBase {
             ClientAppConfig ca = cac.config;
             int cur = cac.index;
             boolean isConsole = ca.className.equals("net.i2p.router.web.RouterConsoleRunner");
+            boolean isDisabledBrowser = SystemVersion.isService() && ca.className.equals("net.i2p.apps.systray.UrlLauncher");
             boolean showStart;
             boolean showStop;
+            boolean showEdit;
             if (isConsole) {
                 showStart = false;
                 showStop = false;
+                showEdit = true;
+            } else if (isDisabledBrowser) {
+                showStart = false;
+                showStop = false;
+                showEdit = false;
             } else {
                 ClientApp clientApp = _context.routerAppManager().getClientApp(ca.className, LoadClientAppsJob.parseArgs(ca.args));
                 showStart = clientApp == null;
                 showStop = clientApp != null && clientApp.getState() == ClientAppState.RUNNING;
+                showEdit = !showStop && (clientApp == null || clientApp.getState() != ClientAppState.STARTING);
             }
             String scur = Integer.toString(cur);
             renderForm(buf, scur, ca.clientName,
                        // urlify, enabled
-                       false, !ca.disabled,
+                       false, !ca.disabled && !isDisabledBrowser,
                        // read only, preventDisable
                        // dangerous, but allow editing the console args too
-                       //"webConsole".equals(ca.clientName) || "Web console".equals(ca.clientName),
-                       false, RouterConsoleRunner.class.getName().equals(ca.className),
+                       isDisabledBrowser, isConsole || isDisabledBrowser,
                        // description
                        DataHelper.escapeHTML(ca.className + ((ca.args != null) ? " " + ca.args : "")),
                        // edit
                        allowEdit && scur.equals(_edit),
                        // show edit button, show update button
-                       // Don't allow edit if it's running, or else we would lose the "handle" to the ClientApp to stop it.
-                       allowEdit && !showStop, false, 
+                       // Don't allow edit if it's running or starting, or else we would lose the "handle" to the ClientApp to stop it.
+                       allowEdit && showEdit,
+                       false, 
                        // show stop button
                        showStop,
                        // show delete button, show start button
@@ -232,10 +240,11 @@ public class ConfigClientsHelper extends HelperBase {
                     desc = _t("Email");
                 else
                     desc = DataHelper.escapeHTML(app) + ".war";
+                boolean isConsole = RouterConsoleRunner.ROUTERCONSOLE.equals(app);
                 renderForm(buf, app, app,
-                           RouterConsoleRunner.ROUTERCONSOLE.equals(app) || (isRunning && !"addressbook".equals(app)),
-                           "true".equals(val), RouterConsoleRunner.ROUTERCONSOLE.equals(app),
-                           RouterConsoleRunner.ROUTERCONSOLE.equals(app), desc,
+                           isConsole || (isRunning && !"addressbook".equals(app)),
+                           "true".equals(val), isConsole,
+                           isConsole, desc,
                            false, false, false, isRunning, false, !isRunning);
             }
         }
@@ -256,7 +265,8 @@ public class ConfigClientsHelper extends HelperBase {
            .append(_t("Control")).append("</th><th align=\"left\">")
            .append(_t("Description")).append("</th></tr>\n");
         Properties props = PluginStarter.pluginProperties();
-        Set<String> keys = new TreeSet<String>(props.stringPropertyNames());
+        Set<String> keys = new TreeSet<String>(Collator.getInstance());
+        keys.addAll(props.stringPropertyNames());
         for (String name : keys) {
             if (name.startsWith(PluginStarter.PREFIX) && name.endsWith(PluginStarter.ENABLED)) {
                 String app = name.substring(PluginStarter.PREFIX.length(), name.lastIndexOf(PluginStarter.ENABLED));
@@ -285,7 +295,7 @@ public class ConfigClientsHelper extends HelperBase {
                         ms = Long.parseLong(s);
                     } catch (NumberFormatException nfe) {}
                     if (ms > 0) {
-                        String date = (new SimpleDateFormat("yyyy-MM-dd HH:mm")).format(new Date(ms));
+                        String date = DataHelper.formatTime(ms);
                         desc.append("<tr><td><b>")
                             .append(_t("Date")).append("</b></td><td>").append(date);
                     }
@@ -368,9 +378,9 @@ public class ConfigClientsHelper extends HelperBase {
         buf.append("</td><td align=\"center\"><input type=\"checkbox\" class=\"optbox\" id=\"").append(index).append("\" name=\"").append(index).append(".enabled\"");
         if (enabled) {
             buf.append(CHECKED);
-            if (ro || preventDisable)
-                buf.append("disabled=\"disabled\" ");
         }
+        if (ro || preventDisable)
+            buf.append("disabled=\"disabled\" ");
         buf.append("></td><td align=\"center\">");
 
         if (showStartButton && (!ro) && !edit) {

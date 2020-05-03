@@ -288,14 +288,14 @@ public class NTCPConnection implements Closeable {
     /**
      *  Valid for inbound; valid for outbound shortly after creation
      */
-    public SocketChannel getChannel() { return _chan; }
+    public synchronized SocketChannel getChannel() { return _chan; }
 
     /**
      *  Valid for inbound; valid for outbound shortly after creation
      */
-    public SelectionKey getKey() { return _conKey; }
-    public void setChannel(SocketChannel chan) { _chan = chan; }
-    public void setKey(SelectionKey key) { _conKey = key; }
+    public synchronized SelectionKey getKey() { return _conKey; }
+    public synchronized void setChannel(SocketChannel chan) { _chan = chan; }
+    public synchronized void setKey(SelectionKey key) { _conKey = key; }
 
     public boolean isInbound() { return _isInbound; }
     public boolean isEstablished() { return _establishState.isComplete(); }
@@ -342,8 +342,9 @@ public class NTCPConnection implements Closeable {
     void finishInboundEstablishment(SessionKey key, long clockSkew, byte prevWriteEnd[], byte prevReadEnd[]) {
         NTCPConnection toClose = locked_finishInboundEstablishment(key, clockSkew, prevWriteEnd, prevReadEnd);
         if (toClose != null) {
-            if (_log.shouldLog(Log.DEBUG))
-                _log.debug("Old connection closed: " + toClose + " replaced by " + this);
+            int drained = toClose.drainOutboundTo(_outbound);
+            if (_log.shouldWarn())
+                _log.warn("Old connection closed: " + toClose + " replaced by " + this + "; drained " + drained);
             _context.statManager().addRateData("ntcp.inboundEstablishedDuplicate", toClose.getUptime());
             toClose.close();
         }
@@ -411,6 +412,24 @@ public class NTCPConnection implements Closeable {
         synchronized(_currentOutbound) {
             return ! _currentOutbound.isEmpty();
         }
+    }
+
+    /**
+     *  Drain any pending outbound messages to a new queue
+     *  @return number drained
+     *  @since 0.9.46
+     */
+    private int drainOutboundTo(Queue<OutNetMessage> to) {
+        int rv = 0;
+        synchronized (_currentOutbound) {
+            rv = _currentOutbound.size();
+            if (rv > 0) {
+                to.addAll(_currentOutbound);
+                _currentOutbound.clear();
+            }
+            rv += _outbound.drainTo(to);
+        }
+        return rv;
     }
     
     /** @return milliseconds */
@@ -1125,7 +1144,12 @@ public class NTCPConnection implements Closeable {
      * async callback after the outbound connection was completed (this should NOT block, 
      * as it occurs in the selector thread)
      */
-    void outboundConnected() {
+    synchronized void outboundConnected() {
+        if (_establishState == EstablishBase.FAILED) {
+            _conKey.cancel();
+            try {_chan.close(); } catch (IOException ignored) {}
+            return;
+        }
         _conKey.interestOps(_conKey.interestOps() | SelectionKey.OP_READ);
         // schedule up the beginning of our handshaking by calling prepareNextWrite on the
         // writer thread pool
@@ -1855,8 +1879,9 @@ public class NTCPConnection implements Closeable {
         }
         NTCPConnection toClose = _transport.inboundEstablished(this);
         if (toClose != null && toClose != this) {
+            int drained = toClose.drainOutboundTo(_outbound);
             if (_log.shouldWarn())
-                _log.warn("Old connection closed: " + toClose + " replaced by " + this);
+                _log.warn("Old connection closed: " + toClose + " replaced by " + this + "; drained " + drained);
             _context.statManager().addRateData("ntcp.inboundEstablishedDuplicate", toClose.getUptime());
             toClose.close();
         }

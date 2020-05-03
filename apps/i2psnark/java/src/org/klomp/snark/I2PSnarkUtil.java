@@ -229,6 +229,34 @@ public class I2PSnarkUtil {
                 for (Map.Entry<String, String> entry : _opts.entrySet() )
                     opts.setProperty(entry.getKey(), entry.getValue());
             }
+            // override preference and start with two tunnels. IdleChecker will ramp up/down as necessary
+            String sin = opts.getProperty("inbound.quantity");
+            if (sin != null) {
+                int in;
+                try {
+                   in = Integer.parseInt(sin);
+                } catch (NumberFormatException nfe) {
+                   in = 3;
+                }
+                if (in > 2)
+                    opts.setProperty("inbound.quantity", "2");
+            }
+            String sout = opts.getProperty("outbound.quantity");
+            if (sout != null) {
+                int out;
+                try {
+                   out = Integer.parseInt(sout);
+                } catch (NumberFormatException nfe) {
+                   out = 3;
+                }
+                if (out > 2)
+                    opts.setProperty("outbound.quantity", "2");
+            }
+            if (opts.containsKey("inbound.backupQuantity"))
+                opts.setProperty("inbound.backupQuantity", "0");
+            if (opts.containsKey("outbound.backupQuantity"))
+                opts.setProperty("outbound.backupQuantity", "0");
+
             if (opts.getProperty("inbound.nickname") == null)
                 opts.setProperty("inbound.nickname", _baseName.replace("i2psnark", "I2PSnark"));
             if (opts.getProperty("outbound.nickname") == null)
@@ -267,6 +295,9 @@ public class I2PSnarkUtil {
                 opts.setProperty("i2p.streaming.answerPings", "false");
             if (opts.getProperty(I2PClient.PROP_SIGTYPE) == null)
                 opts.setProperty(I2PClient.PROP_SIGTYPE, "EdDSA_SHA512_Ed25519");
+            // assume compressed content
+            if (opts.getProperty(I2PClient.PROP_GZIP) == null)
+                opts.setProperty(I2PClient.PROP_GZIP, "false");
             _manager = I2PSocketManagerFactory.createManager(_i2cpHost, _i2cpPort, opts);
             if (_manager != null)
                 _startedTime = _context.clock().now();

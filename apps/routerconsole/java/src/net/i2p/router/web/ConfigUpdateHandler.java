@@ -38,7 +38,12 @@ public class ConfigUpdateHandler extends FormHandler {
     public static final String DEFAULT_NEWS_URL = "http://echelon.i2p/i2p/news.xml";
     /** old default */
     public static final String OLD_DEFAULT_NEWS_URL_SU3 = "http://echelon.i2p/news/news.su3";
-    /** current default, i2pnews.i2p, run by echelon */
+    /**
+     *  current default, i2pnews.i2p, run by echelon
+     *
+     *  NOTE: If you change, also change in Android:
+     *  app/src/main/java/net/i2p/android/apps/NewsFetcher.java
+     */
     public static final String DEFAULT_NEWS_URL_SU3 = "http://tc73n4kivdroccekirco7rhgxdg5f3cjvbaapabupeyzrqwv5guq.b32.i2p/news.su3";
     public static final String PROP_REFRESH_FREQUENCY = "router.newsRefreshFrequency";
     public static final long DEFAULT_REFRESH_FREQ = 36*60*60*1000l;
@@ -80,6 +85,8 @@ public class ConfigUpdateHandler extends FormHandler {
      *  Changed as of release 0.8 to support both .sud and .su2
      *  Some JVMs (IcedTea) don't have pack200
      *  Update hosts must maintain both
+     *
+     *  These versions have not been released since 0.9.22, 2015.
      */
     private static final String PACK200_URLS =
     "http://echelon.i2p/i2p/i2pupdate.su2\r\n" +
@@ -116,13 +123,13 @@ public class ConfigUpdateHandler extends FormHandler {
     private static final String SU3_CERT_DIR = "certificates/router";
 
     /**
-     *  Only enabled if we have pack200 and trusted public key certificates installed
+     *  Only enabled if we have trusted public key certificates installed
      *  @since 0.9.9
      */
     public static final boolean USE_SU3_UPDATE;
     static {
         String[] files = (new File(I2PAppContext.getGlobalContext().getBaseDir(), SU3_CERT_DIR)).list();
-        USE_SU3_UPDATE = FileUtil.isPack200Supported() && files != null && files.length > 0;
+        USE_SU3_UPDATE = files != null && files.length > 0;
     }
 
     private static final String DEFAULT_SU3_UPDATE_URLS =

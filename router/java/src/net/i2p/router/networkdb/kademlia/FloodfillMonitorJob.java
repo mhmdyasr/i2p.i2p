@@ -125,7 +125,7 @@ class FloodfillMonitorJob extends JobImpl {
         if (!getContext().getBooleanPropertyDefaultTrue(TransportManager.PROP_ENABLE_UDP))
             return false;
 
-        if (getContext().commSystem().isInBadCountry())
+        if (getContext().commSystem().isInStrictCountry())
             return false;
         String country = getContext().commSystem().getOurCountry();
         // anonymous proxy, satellite provider (not in bad country list)
@@ -140,9 +140,8 @@ class FloodfillMonitorJob extends JobImpl {
         if (ri == null)
             return false;
         char bw = ri.getBandwidthTier().charAt(0);
-        // Only if class M, N, O, P, X
-        if (bw != Router.CAPABILITY_BW64 &&
-            bw != Router.CAPABILITY_BW128 && bw != Router.CAPABILITY_BW256 &&
+        // Only if class N, O, P, X
+        if (bw != Router.CAPABILITY_BW128 && bw != Router.CAPABILITY_BW256 &&
             bw != Router.CAPABILITY_BW512 && bw != Router.CAPABILITY_BW_UNLIMITED)
             return false;
 

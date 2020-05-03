@@ -129,7 +129,7 @@ class SubSession extends I2PSessionMuxedImpl {
             }
             synchronized(_stateLock) {
                 if (_state != State.OPEN) {
-                    Thread notifier = new I2PAppThread(_availabilityNotifier, "ClientNotifier " + getPrefix(), true);
+                    Thread notifier = new I2PAppThread(_availabilityNotifier, "ClientNotifier " + getName(), true);
                     notifier.start();
                     changeState(State.OPEN);
                 }
@@ -263,8 +263,8 @@ class SubSession extends I2PSessionMuxedImpl {
      *  on reception of HostReplyMessage
      */
     @Override
-    void destLookupFailed(long nonce) {
-        _primary.destLookupFailed(nonce);
+    void destLookupFailed(long nonce, int code) {
+        _primary.destLookupFailed(nonce, code);
     }
 
     /**

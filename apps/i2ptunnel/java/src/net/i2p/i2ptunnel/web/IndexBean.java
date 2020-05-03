@@ -19,6 +19,8 @@ import net.i2p.I2PAppContext;
 import net.i2p.I2PException;
 import net.i2p.app.ClientAppManager;
 import net.i2p.app.Outproxy;
+import net.i2p.crypto.Blinding;
+import net.i2p.data.Base64;
 import net.i2p.data.Certificate;
 import net.i2p.data.DataHelper;
 import net.i2p.data.Destination;
@@ -418,13 +420,23 @@ public class IndexBean {
                        ": " + port + "</font>";
             // dup check, O(n**2)
             List<TunnelController> controllers = _group.getControllers();
+            String ifc = tun.getListenOnInterface();
             for (int i = 0; i < controllers.size(); i++) {
                 if (i == tunnel)
                     continue;
-                if (port.equals(controllers.get(i).getListenPort()))
-                    return "<font color=\"red\">" +
-                           _t("Warning - duplicate port") +
-                           ": " + port + "</font>";
+                TunnelController tc = controllers.get(i);
+                if (port.equals(tc.getListenPort())) {
+                    String ifc2 = tc.getListenOnInterface();
+                    if (DataHelper.eq(ifc, ifc2) ||
+                        "0.0.0.0".equals(ifc) ||
+                        "0.0.0.0".equals(ifc2) ||
+                        "0:0:0:0:0:0:0:0".equals(ifc) ||
+                        "0:0:0:0:0:0:0:0".equals(ifc2)) {
+                        return "<font color=\"red\">" +
+                               _t("Warning - duplicate port") +
+                               ": " + port + "</font>";
+                    }
+                }
             }
             return port;
         }
@@ -552,6 +564,28 @@ public class IndexBean {
             return d.toBase32();
         return "";
     }
+    
+    /**
+     *  Works even if tunnel is not running.
+     *  @return "{56 chars}.b32.i2p" or "" if not blinded
+     *  @since 0.9.40
+     */
+    public String getEncryptedBase32(int tunnel) {
+        Destination d = getDestination(tunnel);
+        if (d != null) {
+            int mode = _helper.getEncryptMode(tunnel);
+            if (mode > 1 && mode < 10) {
+                try {
+                    String secret = _helper.getBlindedPassword(tunnel);
+                    boolean requireSecret = secret != null && secret.length() > 0 &&
+                                            (mode == 3 || mode == 5 || mode == 7 || mode == 9);
+                    boolean requireAuth = mode >= 4 && mode <= 9;
+                    return Blinding.encode(d.getSigningPublicKey(), requireSecret, requireAuth);
+                } catch (RuntimeException re) {}
+            }
+        }
+        return "";
+    }
 
     /**
      *  Works even if tunnel is not running.
@@ -584,6 +618,15 @@ public class IndexBean {
         if (d != null)
             return d.toBase32();
         return "";
+    }
+
+    /**
+     *  Works even if tunnel is not running.
+     *  @return true if offline keys
+     *  @since 0.9.40
+     */
+    public boolean getIsOfflineKeys(int tunnel) {
+        return _helper.isOfflineKeys(tunnel);
     }
     
     /**
@@ -825,6 +868,77 @@ public class IndexBean {
         _config.setEncrypt(true);
     }
 
+    /** @since 0.9.40 */
+    public void setEncryptMode(String val) {
+        if (val != null) {
+            try {
+                _config.setEncryptMode(Integer.parseInt(val.trim()));
+            } catch (NumberFormatException nfe) {}
+        }
+    }
+    
+    /** @since 0.9.40 */
+    public void setNofilter_blindedPassword(String s) {
+        _config.setBlindedPassword(s);
+    }
+
+    /**
+     * Multiple entries in form
+     * @since 0.9.41
+     */
+    public void setNofilter_clientName(String[] s) {
+        if (s != null) {
+            _config.addClientNames(s);
+        }
+    }
+
+
+    /**
+     * Multiple entries in form
+     * @since 0.9.41
+     */
+    public void setclientKey(String[] s) {
+        if (s != null) {
+            _config.addClientKeys(s);
+        }
+    }
+
+    /**
+     * Multiple entries in form
+     * Values are integers
+     * @since 0.9.41
+     */
+    public void setRevokeClient(String[] s) {
+        if (s != null) {
+            _config.revokeClients(s);
+        }
+    }
+
+    /**
+     * @since 0.9.41
+     */
+    public void setNofilter_newClientName(String s) {
+        if (s != null) {
+            _config.newClientName(s.trim());
+        }
+    }
+
+    /**
+     * @since 0.9.41
+     */
+    public void setNewClientKey(String s) {
+        if (s != null) {
+            _config.newClientKey(s.trim());
+        }
+    }
+
+    /**
+     * @since 0.9.41
+     */
+    public void setAddClient(String moo) {
+        _config.setAddClient(true);
+    }
+
     /** @since 0.8.9 */
     public void setDCC(String moo) {
         _config.setDCC(true);
@@ -886,6 +1000,14 @@ public class IndexBean {
                 _config.setAccessMode(Integer.parseInt(val.trim()));
             } catch (NumberFormatException nfe) {}
         }
+    }
+
+    /**
+     *  @since 0.9.40
+     */
+    public void setFilterDefinition(String val) {
+        if (val != null)
+            _config.setFilterDefinition(val);
     }
 
     public void setDelayOpen(String moo) {
@@ -1128,6 +1250,14 @@ public class IndexBean {
     }
 
     /**
+     * Adds to existing, comma separated
+     * @since 0.9.44
+     */
+    public void setEncType(String s) {
+        _config.setEncType(s);
+    }
+
+    /**
      *  Random keys, hidden in forms
      *  @since 0.9.18
      */
@@ -1231,11 +1361,11 @@ public class IndexBean {
         }
         byte[] data = new byte[SessionKey.KEYSIZE_BYTES];
         _context.random().nextBytes(data);
-        SessionKey sk = new SessionKey(data);
-        setEncryptKey(sk.toBase64());
+        String b64 = Base64.encode(data);
+        setEncryptKey(b64);
         setEncrypt("");
         saveChanges();
-        return "New Leaseset Encryption Key: " + sk.toBase64();
+        return "New Leaseset Encryption Key: " + b64;
      }
 
     /**

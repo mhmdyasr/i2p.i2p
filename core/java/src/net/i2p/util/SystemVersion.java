@@ -6,6 +6,7 @@ package net.i2p.util;
 
 import java.lang.reflect.Field;
 import java.util.TimeZone;
+import java.util.TreeSet;
 
 import net.i2p.I2PAppContext;
 
@@ -42,6 +43,9 @@ public abstract class SystemVersion {
     private static final boolean _is64;
     private static final boolean _hasWrapper = System.getProperty("wrapper.version") != null;
     private static final boolean _isLinuxService;
+    // found in Tanuki WrapperManager source so we don't need the WrapperManager class here
+    private static final boolean _isWindowsService = _isWin && _hasWrapper && Boolean.valueOf(System.getProperty("wrapper.service"));
+    private static final boolean _isService;
     private static final boolean _isSlow;
 
     private static final boolean _oneDotSix;
@@ -75,6 +79,7 @@ public abstract class SystemVersion {
         _isLinuxService = !_isWin && !_isMac && !_isAndroid &&
                           (DAEMON_USER.equals(System.getProperty("user.name")) ||
                            (_isGentoo && GENTOO_USER.equals(System.getProperty("user.name"))));
+        _isService = _isLinuxService || _isWindowsService;
         _isSlow = _isAndroid || _isApache || _isArm || _isGNU || _isZero || getMaxMemory() < 48*1024*1024L;
 
         int sdk = 0;
@@ -243,6 +248,40 @@ public abstract class SystemVersion {
     }
 
     /**
+     *  Handles Android also
+     *
+     *  @param minVersion e.g. 11
+     *  @return true if greater than or equal to minVersion
+     *  @since 0.9.41
+     */
+    public static boolean isJava(int minVersion) {
+        return isJava("1." + minVersion);
+    }
+
+    /**
+     *  Handles Android, and minVersions in both forms (e.g. 11 or 1.11)
+     *
+     *  @param minVersion either 1.x or x form works
+     *  @return true if greater than or equal to minVersion
+     *  @since 0.9.41
+     */
+    public static boolean isJava(String minVersion) {
+        String version = System.getProperty("java.version");
+        if (!version.startsWith("1."))
+            version = "1." + version;
+        if (!minVersion.startsWith("1."))
+            minVersion = "1." + minVersion;
+        if (_isAndroid) {
+            if (minVersion.startsWith("1.6"))
+                return _oneDotSix;
+            if (minVersion.startsWith("1.7"))
+                return _oneDotSeven;
+            return false;
+        }
+        return VersionComparator.comp(version, minVersion) >= 0;
+    }
+
+    /**
      * This isn't always correct.
      * http://stackoverflow.com/questions/807263/how-do-i-detect-which-kind-of-jre-is-installed-32bit-vs-64bit
      * http://mark.koli.ch/2009/10/javas-osarch-system-property-is-the-bitness-of-the-jre-not-the-operating-system.html
@@ -261,6 +300,20 @@ public abstract class SystemVersion {
      */
     public static boolean isLinuxService() {
         return _isLinuxService;
+    }
+
+    /*
+     *  @since 0.9.46
+     */
+    public static boolean isWindowsService() {
+        return _isWindowsService;
+    }
+
+    /*
+     *  @since 0.9.46
+     */
+    public static boolean isService() {
+        return _isService;
     }
 
     /**
@@ -341,6 +394,9 @@ public abstract class SystemVersion {
         System.out.println("Java 9   : " + isJava9());
         System.out.println("Java 10  : " + isJava10());
         System.out.println("Java 11  : " + isJava11());
+        for (int i = 12; i <= 15; i++) {
+            System.out.println("Java " + i + "  : " + isJava(i));
+        }
         System.out.println("Android  : " + isAndroid());
         if (isAndroid())
             System.out.println("  Version: " + getAndroidVersion());
@@ -355,8 +411,22 @@ public abstract class SystemVersion {
         System.out.println("OpenJDK  : " + isOpenJDK());
         System.out.println("Slow     : " + isSlow());
         System.out.println("Windows  : " + isWindows());
+        System.out.println("Win. Svc : " + isWindowsService());
         System.out.println("Wrapper  : " + hasWrapper());
         System.out.println("x86      : " + isX86());
         System.out.println("Zero JVM : " + isZeroVM());
+        System.out.println("");
+        System.out.println("System Properties:");
+        TreeSet<String> keys = new TreeSet<String>(System.getProperties().stringPropertyNames());
+        for (String k : keys) {
+            String v = System.getProperty(k);
+            if (k.equals("line.separator")) {
+                if ("\n".equals(v))
+                    v = "\\n";
+                else if ("\r\n".equals(v))
+                    v = "\\r\\n";
+            }
+            System.out.println(k + '=' + v);
+        }
     }
 }

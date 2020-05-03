@@ -213,6 +213,31 @@ public class EditBean extends IndexBean {
     }
     
     /**
+     *  @since 0.9.40
+     */
+    public String getEncryptMode(int tunnel) {
+        return Integer.toString(_helper.getEncryptMode(tunnel));
+    }
+    
+    /**
+     *  @since 0.9.40
+     */
+    public String getBlindedPassword(int tunnel) {
+        return _helper.getBlindedPassword(tunnel);
+    }
+    
+    /**
+     *  List of b64 name : b64key
+     *  Pubkeys for DH, privkeys for PSK
+     *  @param isDH true for DH, false for PSK
+     *  @return non-null
+     *  @since 0.9.41
+     */
+    public List<String> getClientAuths(int tunnel, boolean isDH) {
+        return _helper.getClientAuths(tunnel, isDH);
+    }
+    
+    /**
      *  @param newTunnelType used if tunnel &lt; 0
      *  @since 0.9.12
      */
@@ -227,11 +252,34 @@ public class EditBean extends IndexBean {
 
     /** @since 0.9.33 */
     public boolean canChangeSigType(int tunnel) {
+        if (!canChangeEncType(tunnel))
+            return false;
+        return getDestination(tunnel) == null;
+    }
+
+    /** @since 0.9.46 */
+    public boolean canChangeEncType(int tunnel) {
         if (tunnel < 0)
             return true;
-        if (getDestination(tunnel) != null)
+        if (getTunnelStatus(tunnel) != GeneralHelper.NOT_RUNNING)
             return false;
-        return getTunnelStatus(tunnel) == GeneralHelper.NOT_RUNNING;
+        if (isInitialized() && isSharedClient(tunnel)) {
+            for (TunnelController tc : _group.getControllers()) {
+                if (tc.isClient() &&
+                    Boolean.parseBoolean(tc.getSharedClient()) &&
+                    (tc.getIsRunning() || tc.getIsStarting()))
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     *  @param encType code
+     *  @since 0.9.44
+     */
+    public boolean hasEncType(int tunnel, int encType) {
+        return _helper.hasEncType(tunnel, encType);
     }
 
     /**
@@ -269,6 +317,13 @@ public class EditBean extends IndexBean {
     
     public String getAccessList(int tunnel) {
         return _helper.getAccessList(tunnel);
+    }
+
+    /**
+     *  @since 0.9.40
+     */
+    public String getFilterDefinition(int tunnel) {
+        return _helper.getFilterDefinition(tunnel);
     }
     
     public String getJumpList(int tunnel) {
@@ -422,7 +477,8 @@ public class EditBean extends IndexBean {
 
     /** @since 0.8.3 */
     public Set<String> interfaceSet() {
-        return Addresses.getAllAddresses();
+        // exclude IPv6 temporary
+        return Addresses.getAddresses(true, true, true, false);
     }
 
     /** @since 0.9.12 */
@@ -467,8 +523,7 @@ public class EditBean extends IndexBean {
     public String getQuantityOptions(int tunnel, int mode) {
         int tunnelQuantity = mode == 2 ? getTunnelQuantityOut(tunnel, DFLT_QUANTITY)
                                        : getTunnelQuantity(tunnel, DFLT_QUANTITY);
-        boolean advanced = _context.getBooleanProperty(PROP_ADVANCED);
-        int maxQuantity = advanced ? MAX_ADVANCED_QUANTITY :
+        int maxQuantity = isAdvanced() ? MAX_ADVANCED_QUANTITY :
                                      (isClient(tunnel) ? MAX_CLIENT_QUANTITY : MAX_SERVER_QUANTITY);
         if (tunnelQuantity > maxQuantity)
             maxQuantity = tunnelQuantity;

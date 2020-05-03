@@ -26,6 +26,7 @@ import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.security.MessageDigest;
+import java.text.DateFormat;
 import java.text.DecimalFormat;
 import java.util.Arrays;
 import java.util.Collection;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.zip.Deflater;
@@ -106,6 +108,14 @@ public class DataHelper {
 
     private static final Pattern ILLEGAL_KEY =  Pattern.compile("[#=\r\n;]");
     private static final Pattern ILLEGAL_VALUE =  Pattern.compile("[#\r\n]");
+
+    /**
+     *  The default formatting for date/time, current locale, local time zone
+     *  @since 0.9.43
+     */
+    private static final DateFormat DATE_FORMAT = DateFormat.getDateInstance(DateFormat.MEDIUM);
+    private static final DateFormat TIME_FORMAT = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT);
+    private static boolean _date_tz_set, _time_tz_set;
 
     /** Read a mapping from the stream, as defined by the I2P data structure spec,
      * and store it into a Properties object.
@@ -514,6 +524,7 @@ public class DataHelper {
             fos = new SecureFileOutputStream(tmpFile);
             out = new PrintWriter(new BufferedWriter(new OutputStreamWriter(fos, "UTF-8")));
             out.println("# NOTE: This I2P config file must use UTF-8 encoding");
+            out.println("# Last saved: " + formatTime(System.currentTimeMillis()));
             for (Map.Entry<Object, Object> entry : props.entrySet()) {
                 String name = (String) entry.getKey();
                 String val = (String) entry.getValue();
@@ -1369,25 +1380,25 @@ public class DataHelper {
             // {0,number,####} prevents 1234 from being output as 1,234 in the English locale.
             // If you want the digit separator in your locale, translate as {0}.
             // alternates: msec, msecs
-            t = ngettext("1 ms", "{0,number,####} ms", (int) ms);
+            t = ngettext("{0,number,####} ms", "{0,number,####} ms", (int) ms);
         } else if (ams < 2 * 60 * 1000) {
             // seconds
             // alternates: secs, sec. 'seconds' is probably too long.
-            t = ngettext("1 sec", "{0} sec", (int) (ms / 1000));
+            t = ngettext("{0} sec", "{0} sec", (int) (ms / 1000));
         } else if (ams < 120 * 60 * 1000) {
             // minutes
             // alternates: mins, min. 'minutes' is probably too long.
-            t = ngettext("1 min", "{0} min", (int) (ms / (60 * 1000)));
+            t = ngettext("{0} min", "{0} min", (int) (ms / (60 * 1000)));
         } else if (ams < 2 * 24 * 60 * 60 * 1000) {
             // hours
             // alternates: hrs, hr., hrs.
-            t = ngettext("1 hour", "{0} hours", (int) (ms / (60 * 60 * 1000)));
+            t = ngettext("{0} hour", "{0} hours", (int) (ms / (60 * 60 * 1000)));
         } else if (ams < 3L * 365 * 24 * 60 * 60 * 1000) {
             // days
-            t = ngettext("1 day", "{0} days", (int) (ms / (24 * 60 * 60 * 1000)));
+            t = ngettext("{0} day", "{0} days", (int) (ms / (24 * 60 * 60 * 1000)));
         } else if (ams < 1000L * 365 * 24 * 60 * 60 * 1000) {
             // years
-            t = ngettext("1 year", "{0} years", (int) (ms / (365L * 24 * 60 * 60 * 1000)));
+            t = ngettext("{0} year", "{0} years", (int) (ms / (365L * 24 * 60 * 60 * 1000)));
         } else {
             return _t("n/a");
         }
@@ -1418,23 +1429,23 @@ public class DataHelper {
         if (adms < 0.000000001d) {
             return "0";
         } else if (adms < 0.001d) {
-            t = ngettext("1 ns", "{0,number,###} ns", (int) Math.round(ms * 1000000d));
+            t = ngettext("{0,number,####} ns", "{0,number,###} ns", (int) Math.round(ms * 1000000d));
         } else if (adms < 1.0d) {
-            t = ngettext("1 μs", "{0,number,###} μs", (int) Math.round(ms * 1000d));
+            t = ngettext("{0,number,####} μs", "{0,number,###} μs", (int) Math.round(ms * 1000d));
         } else if (ams < 3 * 1000) {
-            t = ngettext("1 ms", "{0,number,####} ms", (int) Math.round(ms));
+            t = ngettext("{0,number,####} ms", "{0,number,####} ms", (int) Math.round(ms));
         } else if (ams < 2 * 60 * 1000) {
-            t = ngettext("1 sec", "{0} sec", (int) (ms / 1000));
+            t = ngettext("{0} sec", "{0} sec", (int) (ms / 1000));
         } else if (ams < 120 * 60 * 1000) {
-            t = ngettext("1 min", "{0} min", (int) (ms / (60 * 1000)));
+            t = ngettext("{0} min", "{0} min", (int) (ms / (60 * 1000)));
         } else if (ams < 2 * 24 * 60 * 60 * 1000) {
-            t = ngettext("1 hour", "{0} hours", (int) (ms / (60 * 60 * 1000)));
+            t = ngettext("{0} hour", "{0} hours", (int) (ms / (60 * 60 * 1000)));
         } else if (ams < 3L * 365 * 24 * 60 * 60 * 1000) {
             // days
-            t = ngettext("1 day", "{0} days", (int) (ms / (24 * 60 * 60 * 1000)));
+            t = ngettext("{0} day", "{0} days", (int) (ms / (24 * 60 * 60 * 1000)));
         } else if (ams < 1000L * 365 * 24 * 60 * 60 * 1000) {
             // years
-            t = ngettext("1 year", "{0} years", (int) (ms / (365L * 24 * 60 * 60 * 1000)));
+            t = ngettext("{0} year", "{0} years", (int) (ms / (365L * 24 * 60 * 60 * 1000)));
         } else {
             return _t("n/a");
         }
@@ -1443,7 +1454,7 @@ public class DataHelper {
         return t.replace(" ", "&nbsp;");
     }
     
-    private static final String BUNDLE_NAME = "net.i2p.router.web.messages";
+    private static final String BUNDLE_NAME = "net.i2p.util.messages";
 
     private static String _t(String key) {
         return Translate.getString(key, I2PAppContext.getGlobalContext(), BUNDLE_NAME);
@@ -1605,6 +1616,46 @@ public class DataHelper {
             case 7: return str + "Z";
             case 8: return str + "Y";
             default: return bytes + space;
+        }
+    }
+
+    /**
+     *  The default formatting for date, current locale, local time zone.
+     *  Warning - NOT UTC!
+     *  Examples:
+     *  en: Aug 30, 2019
+     *  de: 30.08.2019
+     *  @since 0.9.43
+     */
+    public static String formatDate(long now) {
+        synchronized(DATE_FORMAT) {
+            if (!_date_tz_set) {
+                // delayed set, too early if done in static block
+                TimeZone tz = SystemVersion.getSystemTimeZone();
+                DATE_FORMAT.setTimeZone(tz);
+                _date_tz_set = true;
+            }
+            return DATE_FORMAT.format(new Date(now));
+        }
+    }
+
+    /**
+     *  The default formatting for date/time, current locale, local time zone.
+     *  Warning - NOT UTC!
+     *  Examples:
+     *  en: Aug 30, 2019 12:38 PM
+     *  de: 30.08.2019 12:38
+     *  @since 0.9.43
+     */
+    public static String formatTime(long now) {
+        synchronized(TIME_FORMAT) {
+            if (!_time_tz_set) {
+                // delayed set, too early if done in static block
+                TimeZone tz = SystemVersion.getSystemTimeZone();
+                TIME_FORMAT.setTimeZone(tz);
+                _time_tz_set = true;
+            }
+            return TIME_FORMAT.format(new Date(now));
         }
     }
     

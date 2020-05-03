@@ -16,20 +16,24 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import net.i2p.crypto.SigAlgo;
 import net.i2p.crypto.SigType;
+import net.i2p.data.BlindData;
 import net.i2p.data.Certificate;
 import net.i2p.data.DatabaseEntry;
 import net.i2p.data.DataFormatException;
 import net.i2p.data.DataHelper;
 import net.i2p.data.Destination;
+import net.i2p.data.EncryptedLeaseSet;
 import net.i2p.data.Hash;
 import net.i2p.data.KeyCertificate;
 import net.i2p.data.LeaseSet;
 import net.i2p.data.LeaseSet2;
+import net.i2p.data.SigningPublicKey;
 import net.i2p.data.i2np.DatabaseLookupMessage;
 import net.i2p.data.i2np.DatabaseStoreMessage;
 import net.i2p.data.router.RouterAddress;
@@ -73,6 +77,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
     private volatile long _lastRIPublishTime;
     private NegativeLookupCache _negativeCache;
     protected final int _networkID;
+    private final BlindCache _blindCache;
 
     /** 
      * Map of Hash to RepublishLeaseSetJob for leases we'realready managing.
@@ -171,6 +176,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
         _publishingLeaseSets = new HashMap<Hash, RepublishLeaseSetJob>(8);
         _activeRequests = new HashMap<Hash, SearchJob>(8);
         _reseedChecker = new ReseedChecker(context);
+        _blindCache = new BlindCache(context);
         context.statManager().createRateStat("netDb.lookupDeferred", "how many lookups are deferred?", "NetworkDatabase", new long[] { 60*60*1000 });
         context.statManager().createRateStat("netDb.exploreKeySet", "how many keys are queued for exploration?", "NetworkDatabase", new long[] { 60*60*1000 });
         context.statManager().createRateStat("netDb.negativeCache", "Aborted lookup, already cached", "NetworkDatabase", new long[] { 60*60*1000l });
@@ -246,7 +252,9 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
         //_ds = null;
         _exploreKeys.clear(); // hope this doesn't cause an explosion, it shouldn't.
         // _exploreKeys = null;
-        _negativeCache.clear();
+        if (_negativeCache != null)
+            _negativeCache.clear();
+        _blindCache.shutdown();
     }
     
     public synchronized void restart() {
@@ -257,6 +265,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
         }
         _ds.restart();
         _exploreKeys.clear();
+        _blindCache.startup();
 
         _initialized = true;
         
@@ -287,6 +296,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
 //        _exploreKeys = new HashSet(64);
         _dbDir = dbDir;
         _negativeCache = new NegativeLookupCache(_context);
+        _blindCache.startup();
         
         createHandlers();
         
@@ -464,6 +474,45 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
     }
     
     /**
+     *  @param spk unblinded key
+     *  @return BlindData or null
+     *  @since 0.9.40
+     */
+    @Override
+    public BlindData getBlindData(SigningPublicKey spk) {
+        return _blindCache.getData(spk);
+    }
+    
+    /**
+     *  @param bd new BlindData to put in the cache
+     *  @since 0.9.40
+     */
+    @Override
+    public void setBlindData(BlindData bd) {
+        if (_log.shouldWarn())
+            _log.warn("Adding to blind cache: " + bd);
+        _blindCache.addToCache(bd);
+    }
+
+    /**
+     *  For console ConfigKeyringHelper
+     *  @since 0.9.41
+     */
+    public List<BlindData> getBlindData() {
+        return _blindCache.getData();
+    }
+
+    /**
+     *  For console ConfigKeyringHelper
+     *  @param spk the unblinded public key
+     *  @return true if removed
+     *  @since 0.9.41
+     */
+    public boolean removeBlindData(SigningPublicKey spk) {
+        return _blindCache.removeBlindData(spk);
+    }
+    
+    /**
      *  @return RouterInfo, LeaseSet, or null, validated
      *  @since 0.8.3
      */
@@ -476,10 +525,12 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
         int type = rv.getType();
         if (DatabaseEntry.isLeaseSet(type)) {
             LeaseSet ls = (LeaseSet)rv;
-            if (ls.isCurrent(Router.CLOCK_FUDGE_FACTOR))
+            if (ls.isCurrent(Router.CLOCK_FUDGE_FACTOR)) {
                 return rv;
-            else
+            } else {
+                key = _blindCache.getHash(key);
                 fail(key);
+            }
         } else if (type == DatabaseEntry.KEY_TYPE_ROUTERINFO) {
             try {
                 if (validate((RouterInfo)rv) == null)
@@ -533,6 +584,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
         } else {
             //if (_log.shouldLog(Log.DEBUG))
             //    _log.debug("leaseSet not found locally, running search");
+            key = _blindCache.getHash(key);
             search(key, onFindJob, onFailedLookupJob, timeoutMs, true, fromLocalDest);
         }
         //if (_log.shouldLog(Log.DEBUG))
@@ -549,6 +601,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
      */
     public void lookupLeaseSetRemotely(Hash key, Hash fromLocalDest) {
         if (!_initialized) return;
+        key = _blindCache.getHash(key);
         search(key, null, null, 20*1000, true, fromLocalDest);
     }
 
@@ -564,6 +617,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
                 if (ls.isCurrent(Router.CLOCK_FUDGE_FACTOR)) {
                     return ls;
                 } else {
+                    key = _blindCache.getHash(key);
                     fail(key);
                     // this was an interesting key, so either refetch it or simply explore with it
                     _exploreKeys.add(key);
@@ -599,6 +653,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
                 _log.info("Negative cached, not searching dest: " + key);
             _context.jobQueue().addJob(onFinishedJob);
         } else {
+            key = _blindCache.getHash(key);
             search(key, onFinishedJob, onFinishedJob, timeoutMs, true, fromLocalDest);
         }
     }
@@ -889,8 +944,43 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
         
         // spoof / hash collision detection
         // todo allow non-exp to overwrite exp
-        if (rv != null && !leaseSet.getDestination().equals(rv.getDestination()))
-            throw new IllegalArgumentException("LS Hash collision");
+        if (rv != null) {
+            Destination d1 = leaseSet.getDestination();
+            Destination d2 = rv.getDestination();
+            if (d1 != null && d2 != null && !d1.equals(d2))
+                throw new IllegalArgumentException("LS Hash collision");
+        }
+
+        EncryptedLeaseSet encls = null;
+        int type = leaseSet.getType();
+        if (type == DatabaseEntry.KEY_TYPE_ENCRYPTED_LS2) {
+            // set dest or key before validate() calls verifySignature() which
+            // will do the decryption
+            encls = (EncryptedLeaseSet) leaseSet;
+            BlindData bd = _blindCache.getReverseData(leaseSet.getSigningKey());
+            if (bd != null) {
+                if (_log.shouldWarn())
+                    _log.warn("Found blind data for encls: " + bd);
+                // secret must be set before destination
+                String secret = bd.getSecret();
+                if (secret != null)
+                    encls.setSecret(secret);
+                Destination dest = bd.getDestination();
+                if (dest != null) {
+                    encls.setDestination(dest);
+                } else {
+                    encls.setSigningKey(bd.getUnblindedPubKey());
+                }
+                // per-client auth
+                if (bd.getAuthType() != BlindData.AUTH_NONE)
+                    encls.setClientPrivateKey(bd.getAuthPrivKey());
+            } else {
+                // if we created it, there's no blind data, but it's still decrypted
+                if (encls.getDecryptedLeaseSet() == null && _log.shouldWarn())
+                    _log.warn("No blind data found for encls: " + leaseSet);
+            }
+        }
+
 
         String err = validate(key, leaseSet);
         if (err != null)
@@ -898,6 +988,27 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
         
         _ds.put(key, leaseSet);
         
+        if (encls != null) {
+            // we now have decrypted it, store it as well
+            LeaseSet decls = encls.getDecryptedLeaseSet();
+            if (decls != null) {
+                if (_log.shouldWarn())
+                    _log.warn("Successfully decrypted encls: " + decls);
+                // recursion
+                Destination dest = decls.getDestination();
+                store(dest.getHash(), decls);
+                _blindCache.setBlinded(dest);
+            }
+        } else if (type == DatabaseEntry.KEY_TYPE_LS2 || type == DatabaseEntry.KEY_TYPE_META_LS2) {
+             // if it came in via garlic
+             LeaseSet2 ls2 = (LeaseSet2) leaseSet;
+             if (ls2.isBlindedWhenPublished()) {
+                 Destination dest = leaseSet.getDestination();
+                 if (dest != null)
+                    _blindCache.setBlinded(dest, null, null);
+            }
+        }
+
         // Iterate through the old failure / success count, copying over the old
         // values (if any tunnels overlap between leaseSets).  no need to be
         // ueberthreadsafe fascists here, since these values are just heuristics
@@ -1033,7 +1144,7 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
             return "Peer published " + DataHelper.formatDuration(age) + " ago";
         }
         if (upLongEnough && !routerInfo.isCurrent(ROUTER_INFO_EXPIRATION_SHORT)) {
-            if (routerInfo.getTargetAddress("NTCP") == null)
+            if (routerInfo.getTargetAddresses("NTCP", "NTCP2").isEmpty())
                 return "Peer published > 75m ago, SSU only without introducers";
         }
         return null;
@@ -1114,19 +1225,22 @@ public abstract class KademliaNetworkDatabaseFacade extends NetworkDatabaseFacad
             if (DatabaseEntry.isLeaseSet(etype)) {
                 LeaseSet ls = (LeaseSet) entry;
                 Destination d = ls.getDestination();
-                Certificate c = d.getCertificate();
-                if (c.getCertificateType() == Certificate.CERTIFICATE_TYPE_KEY) {
-                    try {
-                        KeyCertificate kc = c.toKeyCertificate();
-                        SigType type = kc.getSigType();
-                        if (type == null || !type.isAvailable() || type.getBaseAlgorithm() == SigAlgo.RSA) {
-                            failPermanently(d);
-                            String stype = (type != null) ? type.toString() : Integer.toString(kc.getSigTypeCode());
-                            if (_log.shouldLog(Log.WARN))
-                                _log.warn("Unsupported sig type " + stype + " for destination " + h);
-                            throw new UnsupportedCryptoException("Sig type " + stype);
-                        }
-                    } catch (DataFormatException dfe) {}
+                // will be null for encrypted LS
+                if (d != null) {
+                    Certificate c = d.getCertificate();
+                    if (c.getCertificateType() == Certificate.CERTIFICATE_TYPE_KEY) {
+                        try {
+                            KeyCertificate kc = c.toKeyCertificate();
+                            SigType type = kc.getSigType();
+                            if (type == null || !type.isAvailable() || type.getBaseAlgorithm() == SigAlgo.RSA) {
+                                failPermanently(d);
+                                String stype = (type != null) ? type.toString() : Integer.toString(kc.getSigTypeCode());
+                                if (_log.shouldLog(Log.WARN))
+                                    _log.warn("Unsupported sig type " + stype + " for destination " + h);
+                                throw new UnsupportedCryptoException("Sig type " + stype);
+                            }
+                        } catch (DataFormatException dfe) {}
+                    }
                 }
             } else if (etype == DatabaseEntry.KEY_TYPE_ROUTERINFO) {
                 RouterInfo ri = (RouterInfo) entry;

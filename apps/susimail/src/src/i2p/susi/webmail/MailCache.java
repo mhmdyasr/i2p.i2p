@@ -39,9 +39,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Hashtable;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import net.i2p.I2PAppContext;
@@ -62,7 +63,7 @@ class MailCache {
 	}
 
 	private final POP3MailBox mailbox;
-	private final Hashtable<String, Mail> mails;
+	private final Map<String, Mail> mails;
 	private final PersistentMailCache disk;
 	private final I2PAppContext _context;
 	private final Folder<String> folder;
@@ -87,13 +88,16 @@ class MailCache {
 		  String host, int port, String user, String pass) throws IOException {
 		_log = ctx.logManager().getLog(MailCache.class);
 		this.mailbox = mailbox;
-		mails = new Hashtable<String, Mail>();
+		mails = new HashMap<String, Mail>();
 		disk = new PersistentMailCache(ctx, host, port, user, pass, folderName);
 		_context = ctx;
 		Folder<String> folder = new Folder<String>();	
 		// setElements() sorts, so configure the sorting first
 		//sessionObject.folder.addSorter( SORT_ID, new IDSorter( sessionObject.mailCache ) );
-		folder.addSorter(WebMail.SORT_SENDER, new SenderSorter(this));
+		if (folderName.equals(WebMail.DIR_DRAFTS) || folderName.equals(WebMail.DIR_SENT))
+			folder.addSorter(WebMail.SORT_SENDER, new ToSorter(this));
+		else
+			folder.addSorter(WebMail.SORT_SENDER, new SenderSorter(this));
 		folder.addSorter(WebMail.SORT_SUBJECT, new SubjectSorter(this));
 		folder.addSorter(WebMail.SORT_DATE, new DateSorter(this));
 		folder.addSorter(WebMail.SORT_SIZE, new SizeSorter(this));
@@ -333,7 +337,7 @@ class MailCache {
 		Mail mail = null, newMail = null;
 
 		/*
-		 * synchronize update to hashtable
+		 * synchronize update to Map
 		 */
 		synchronized(mails) {
 			mail = mails.get( uidl );
@@ -418,7 +422,7 @@ class MailCache {
 			boolean headerOnly = hOnly;
 
 			/*
-			 * synchronize update to hashtable
+			 * synchronize update to Map
 			 */
 			synchronized(mails) {
 				mail = mails.get( uidl );

@@ -1,9 +1,7 @@
 package net.i2p.router.tunnel;
 
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 import java.util.Properties;
 
 import net.i2p.data.Base64;
@@ -16,8 +14,9 @@ import net.i2p.router.TunnelInfo;
  * Coordinate the info that the tunnel creator keeps track of, including what 
  * peers are in the tunnel and what their configuration is
  *
+ * See PooledTunnelCreatorConfig for the non-abstract class
  */
-public class TunnelCreatorConfig implements TunnelInfo {
+public abstract class TunnelCreatorConfig implements TunnelInfo {
     protected final RouterContext _context;
     /** only necessary for client tunnels */
     private final Hash _destination;
@@ -42,7 +41,6 @@ public class TunnelCreatorConfig implements TunnelInfo {
     private long _peakThroughputLastCoallesce = System.currentTimeMillis();
     // Make configurable? - but can't easily get to pool options from here
     private static final int MAX_CONSECUTIVE_TEST_FAILURES = 3;
-    private static final SimpleDateFormat _fmt = new SimpleDateFormat("HH:mm:ss", Locale.UK);
     
     /** 
      * For exploratory only (null destination)
@@ -142,6 +140,7 @@ public class TunnelCreatorConfig implements TunnelInfo {
     /** component ordering in the new style request */
     public List<Integer> getReplyOrder() { return _order; }
     public void setReplyOrder(List<Integer> order) { _order = order; }
+
     /** new style reply message id */
     public long getReplyMessageId() { return _replyMessageId; }
     public void setReplyMessageId(long id) { _replyMessageId = id; }
@@ -160,7 +159,7 @@ public class TunnelCreatorConfig implements TunnelInfo {
         long timeSince = now - _peakThroughputLastCoallesce;
         if (timeSince >= 60*1000) {
             long tot = _peakThroughputCurrentTotal;
-            double normalized = tot * 60d*1000d / timeSince;
+            int normalized = (int) (tot * 60d*1000d / timeSince);
             _peakThroughputLastCoallesce = now;
             _peakThroughputCurrentTotal = 0;
             if (_context != null) {
@@ -168,7 +167,7 @@ public class TunnelCreatorConfig implements TunnelInfo {
                 int start = _isInbound ? 0 : 1;
                 int end = _isInbound ? _peers.length - 1 : _peers.length;
                 for (int i = start; i < end; i++) {
-                    _context.profileManager().tunnelDataPushed1m(_peers[i], (int)normalized);
+                    _context.profileManager().tunnelDataPushed1m(_peers[i], normalized);
                 }
             }
         }
@@ -204,6 +203,7 @@ public class TunnelCreatorConfig implements TunnelInfo {
             return true;
         }
     }
+
     public boolean getTunnelFailed() { return _failed; }
     public int getTunnelFailures() { return _failures; }
     
@@ -268,7 +268,7 @@ public class TunnelCreatorConfig implements TunnelInfo {
                 buf.append("-->");
         }
         
-        buf.append(" exp. ").append(getExpirationString());
+        buf.append(" exp. ").append(new Date(_expiration));
         if (_replyMessageId > 0)
             buf.append(" replyMsgID ").append(_replyMessageId);
         if (_messagesProcessed > 0)
@@ -277,16 +277,5 @@ public class TunnelCreatorConfig implements TunnelInfo {
         if (_failures > 0)
             buf.append(" with ").append(_failures).append(" failures");
         return buf.toString();
-    }
-    
-    private String getExpirationString() {
-        return format(_expiration);
-    }
-
-    static String format(long date) {
-        Date d = new Date(date);
-        synchronized (_fmt) {
-            return _fmt.format(d);
-        }
     }
 }

@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.i2p.crypto.SigType;
@@ -85,7 +84,7 @@ public class TransportManager implements TransportEventListener {
 
     /** default true */
     private static final String PROP_NTCP1_ENABLE = "i2np.ntcp1.enable";
-    private static final boolean DEFAULT_NTCP1_ENABLE = true;
+    private static final boolean DEFAULT_NTCP1_ENABLE = false;
     private static final String PROP_NTCP2_ENABLE = "i2np.ntcp2.enable";
     private static final boolean DEFAULT_NTCP2_ENABLE = true;
 
@@ -116,7 +115,8 @@ public class TransportManager implements TransportEventListener {
         boolean enableNTCP2 = isNTCPEnabled(context) &&
                               context.getProperty(PROP_NTCP2_ENABLE, DEFAULT_NTCP2_ENABLE);
         _dhThread = (_enableUDP || enableNTCP2) ? new DHSessionKeyBuilder.PrecalcRunner(context) : null;
-        _xdhThread = enableNTCP2 ? new X25519KeyFactory(context) : null;
+        // always created, even if NTCP2 is not enabled, because ratchet needs it
+        _xdhThread = new X25519KeyFactory(context);
     }
 
     /**
@@ -166,6 +166,14 @@ public class TransportManager implements TransportEventListener {
     DHSessionKeyBuilder.Factory getDHFactory() {
         return _dhThread;
     }
+
+    /**
+     *  Factory for making X25519 key pairs.
+     *  @since 0.9.46
+     */
+    X25519KeyFactory getXDHFactory() {
+        return _xdhThread;
+    }
     
     private void addTransport(Transport transport) {
         if (transport == null) return;
@@ -192,7 +200,9 @@ public class TransportManager implements TransportEventListener {
         }
         if (isNTCPEnabled(_context)) {
             DHSessionKeyBuilder.PrecalcRunner dh = _enableNTCP1 ? _dhThread : null;
-            Transport ntcp = new NTCPTransport(_context, dh, _xdhThread);
+            boolean enableNTCP2 = _context.getProperty(PROP_NTCP2_ENABLE, DEFAULT_NTCP2_ENABLE);
+            X25519KeyFactory xdh = enableNTCP2 ? _xdhThread : null;
+            Transport ntcp = new NTCPTransport(_context, dh, xdh);
             addTransport(ntcp);
             initializeAddress(ntcp);
             if (udp != null) {
@@ -213,7 +223,9 @@ public class TransportManager implements TransportEventListener {
     }
     
     public static boolean isNTCPEnabled(RouterContext ctx) {
-        return ctx.getBooleanPropertyDefaultTrue(PROP_ENABLE_NTCP);
+        return ctx.getBooleanPropertyDefaultTrue(PROP_ENABLE_NTCP) &&
+               (ctx.getProperty(PROP_NTCP1_ENABLE, DEFAULT_NTCP1_ENABLE) ||
+                ctx.getProperty(PROP_NTCP2_ENABLE, DEFAULT_NTCP2_ENABLE));
     }
     
     /**
@@ -241,52 +253,84 @@ public class TransportManager implements TransportEventListener {
     private void initializeAddress(Collection<Transport> ts) {
         if (ts.isEmpty())
             return;
-        Set<String> ipset = Addresses.getAddresses(false, true);  // non-local, include IPv6
+        // non-local (unless test mode), don't include loopback, include IPv6
+        Set<String> ipset = Addresses.getAddresses(_context.getBooleanProperty("i2np.allowLocal"), false, true);
+        String lastv4 = _context.getProperty(UDPTransport.PROP_IP);
+        String lastv6 = _context.getProperty(UDPTransport.PROP_IPV6);
+        boolean preferTemp = _context.getBooleanProperty(UDPTransport.PROP_LAPTOP_MODE);
         //
-        // Avoid IPv6 temporary addresses if we have a non-temporary one
+        // Avoid IPv6 temporary addresses if we have a non-temporary one,
+        // unless laptop mode
         //
-        boolean hasNonTempV6Address = false;
+        boolean hasPreferredV6Address = false;
         List<InetAddress> addresses = new ArrayList<InetAddress>(4);
-        List<Inet6Address> tempV6Addresses = new ArrayList<Inet6Address>(4);
+        List<Inet6Address> nonPreferredV6Addresses = new ArrayList<Inet6Address>(4);
         for (String ips : ipset) {
             try {
                 InetAddress addr = InetAddress.getByName(ips);
                 if (ips.contains(":") && (addr instanceof Inet6Address)) {
                     Inet6Address v6addr = (Inet6Address) addr;
                     // getAddresses(false, true) will not return deprecated addresses
-                    //if (Addresses.isDeprecated(v6addr)) {
-                    //    if (_log.shouldWarn())
-                    //        _log.warn("Not binding to deprecated temporary address " + bt);
-                    //    continue;
-                    //}
-                    if (Addresses.isTemporary(v6addr)) {
-                        // Save temporary addresses
-                        // we only use these if we don't have a non-temporary adress
-                        tempV6Addresses.add(v6addr);
-                        continue;
+                    boolean isTemp = Addresses.isTemporary(v6addr);
+                    if (preferTemp) {
+                        if (!isTemp) {
+                            // Save permanent addresses
+                            // we only use these if we don't have a temporary address,
+                            nonPreferredV6Addresses.add(v6addr);
+                            continue;
+                        }
+                    } else {
+                        if (isTemp && !ips.equals(lastv6)) {
+                            // Save temporary addresses
+                            // we only use these if we don't have a permanent address,
+                            // unless it's the last IP we used
+                            nonPreferredV6Addresses.add(v6addr);
+                            continue;
+                        }
                     }
-                    hasNonTempV6Address = true;
+                    hasPreferredV6Address = true;
                 }
-                addresses.add(addr);
+                // put previously used addresses at the front of the list
+                if (ips.equals(lastv4) || ips.equals(lastv6))
+                    addresses.add(0, addr);
+                else
+                    addresses.add(addr);
             } catch (UnknownHostException e) {
                 _log.error("UDP failed to bind to local address", e);
             }
         }
-        // we only use these if we don't have a non-temporary adress
-        if (!tempV6Addresses.isEmpty()) {
-            if (hasNonTempV6Address) {
+        // we only use these if we don't have a preferred adress
+        if (!nonPreferredV6Addresses.isEmpty()) {
+            if (hasPreferredV6Address) {
                 if (_log.shouldWarn()) {
-                    for (Inet6Address addr : tempV6Addresses) {
-                        _log.warn("Not binding to temporary address " + addr.getHostAddress());
+                    for (Inet6Address addr : nonPreferredV6Addresses) {
+                        _log.warn("Not binding to address " + addr.getHostAddress());
                     }
                 }
             } else {
-                addresses.addAll(tempV6Addresses);
+                addresses.addAll(nonPreferredV6Addresses);
+            }
+        }
+        if (_log.shouldWarn()) {
+            for (InetAddress ia : addresses) {
+                _log.warn("Transport address: " + ia.getHostAddress());
             }
         }
         for (Transport t : ts) {
+            // the transports really don't like being called with more than one of each
+            boolean hasv4 = false;
+            boolean hasv6 = false;
             for (InetAddress ia : addresses) {
                 byte[] ip = ia.getAddress();
+                if (ip.length == 4) {
+                    if (hasv4)
+                        continue;
+                    hasv4 = true;
+                } else {
+                    if (hasv6)
+                        continue;
+                    hasv6 = true;
+                }
                 t.externalAddressReceived(SOURCE_INTERFACE, ip, 0);
             }
         }
@@ -341,7 +385,10 @@ public class TransportManager implements TransportEventListener {
         // Maybe we need a config option to force on? Probably not.
         // What firewall supports UPnP and is configured with a public address on the LAN side?
         // Unlikely.
-        if (_upnpManager != null && Addresses.getAnyAddress() == null)
+        // Always start on Android, as we may have a cellular IPv4 address but
+        // are routing all traffic through WiFi.
+        // Also, conditions may change rapidly.
+        if (_upnpManager != null && (SystemVersion.isAndroid() || Addresses.getAnyAddress() == null))
             _upnpManager.start();
         configTransports();
         _log.debug("Starting up the transport manager");
@@ -490,14 +537,14 @@ public class TransportManager implements TransportEventListener {
     
     /**
      * Return our peer clock skews on all transports.
-     * Vector composed of Long, each element representing a peer skew in seconds.
+     * List composed of Long, each element representing a peer skew in seconds.
      * A positive number means our clock is ahead of theirs.
      * Note: this method returns them in whimsical order.
      */
-    Vector<Long> getClockSkews() {
-        Vector<Long> skews = new Vector<Long>();
+    List<Long> getClockSkews() {
+        List<Long> skews = new ArrayList<Long>();
         for (Transport t : _transports.values()) {
-            Vector<Long> tempSkews = t.getClockSkews();
+            List<Long> tempSkews = t.getClockSkews();
             if ((tempSkews == null) || (tempSkews.isEmpty())) continue;
             skews.addAll(tempSkews);
         }

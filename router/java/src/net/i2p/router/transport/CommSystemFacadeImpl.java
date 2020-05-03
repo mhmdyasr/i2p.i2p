@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.SortedMap;
-import java.util.Vector;
 
 import net.i2p.data.Hash;
 import net.i2p.data.router.RouterAddress;
@@ -25,6 +24,7 @@ import net.i2p.router.CommSystemFacade;
 import net.i2p.router.OutNetMessage;
 import net.i2p.router.RouterContext;
 import net.i2p.router.transport.crypto.DHSessionKeyBuilder;
+import net.i2p.router.transport.crypto.X25519KeyFactory;
 import net.i2p.router.transport.udp.UDPTransport;
 import net.i2p.router.util.EventLog;
 import net.i2p.util.Addresses;
@@ -32,6 +32,7 @@ import net.i2p.util.I2PThread;
 import net.i2p.util.Log;
 import net.i2p.util.SimpleTimer;
 import net.i2p.util.SimpleTimer2;
+import net.i2p.util.SystemVersion;
 import net.i2p.util.Translate;
 
 public class CommSystemFacadeImpl extends CommSystemFacade {
@@ -47,6 +48,9 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
      *  @since IPv6
      */
     private static final String PROP_DISABLED = "i2np.disable";
+
+    private static final String BUNDLE_NAME = "net.i2p.router.web.messages";
+    private static final String COUNTRY_BUNDLE_NAME = "net.i2p.router.countries.messages";
     
     public CommSystemFacadeImpl(RouterContext context) {
         _context = context;
@@ -55,7 +59,6 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
         _netMonitorStatus = true;
         _geoIP = new GeoIP(_context);
         _manager = new TransportManager(_context);
-        startGeoIP();
     }
     
     public synchronized void startup() {
@@ -110,11 +113,11 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
      *
      * A positive number means our clock is ahead of theirs.
      *
-     * Todo: change Vectors to milliseconds
+     * Todo: change List to milliseconds
      */
     @Override
     public long getFramedAveragePeerClockSkew(int percentToInclude) {
-        Vector<Long> skews = _manager.getClockSkews();
+        List<Long> skews = _manager.getClockSkews();
         if (skews == null ||
             skews.isEmpty() ||
             (skews.size() < 5 && _context.clock().getUpdatedSuccessfully())) {
@@ -221,6 +224,15 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
         if (rv != Status.HOSED && _context.router().isHidden())
             return Status.OK;
         return rv; 
+    }
+
+    /**
+     * getStatus().toStatusString(), translated if available.
+     * @since 0.9.45
+     */
+    @Override
+    public String getLocalizedStatusString() {
+        return Translate.getString(getStatus().toStatusString(), _context, ROUTER_BUNDLE_NAME);
     }
 
     /**
@@ -354,6 +366,15 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
     public DHSessionKeyBuilder.Factory getDHFactory() {
         return _manager.getDHFactory();
     }
+
+    /**
+     *  Factory for making X25519 key pairs.
+     *  @since 0.9.46
+     */
+    @Override
+    public X25519KeyFactory getXDHFactory() {
+        return _manager.getXDHFactory();
+    }
     
     /*
      * GeoIP stuff
@@ -363,8 +384,17 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
      * tunnel selection, banlisting, etc.
      */
 
+    /**
+     *  Router must call after netdb is initialized
+     *  @since 0.9.41
+     */
+    @Override
+    public void initGeoIP() {
+        startGeoIP();
+    }
+
     /* We hope the routerinfos are read in and things have settled down by now, but it's not required to be so */
-    private static final int START_DELAY = 5*60*1000;
+    private static final int START_DELAY = SystemVersion.isSlow() ? 5*60*1000 : 5*1000;
     private static final int LOOKUP_TIME = 30*60*1000;
 
     private void startGeoIP() {
@@ -417,6 +447,9 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
         }
     }
 
+    /**
+     *  @param ip ipv4 or ipv6
+     */
     @Override
     public void queueLookup(byte[] ip) {
         _geoIP.add(ip);
@@ -432,33 +465,36 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
     }
 
     /**
-     *  Are we in a bad place
+     *  Are we in a strict country
      *  @since 0.8.13
      */
     @Override
-    public boolean isInBadCountry() {
+    public boolean isInStrictCountry() {
         String us = getOurCountry();
-        return (us != null && StrictCountries.contains(us)) || _context.getBooleanProperty("router.forceBadCountry");
+        return (us != null && StrictCountries.contains(us)) || _context.getBooleanProperty("router.forceStrictCountry");
     }
 
     /**
-     *  Are they in a bad place
+     *  Are they in a strict country.
+     *  Not recommended for our local router hash, as we may not be either in the cache or netdb,
+     *  or may not be publishing an IP.
+     *
      *  @param peer non-null
      *  @since 0.9.16
      */
     @Override
-    public boolean isInBadCountry(Hash peer) {
+    public boolean isInStrictCountry(Hash peer) {
         String c = getCountry(peer);
         return c != null && StrictCountries.contains(c);
     }
 
     /**
-     *  Are they in a bad place
+     *  Are they in a strict country
      *  @param ri non-null
      *  @since 0.9.16
      */
     @Override
-    public boolean isInBadCountry(RouterInfo ri) {
+    public boolean isInStrictCountry(RouterInfo ri) {
         byte[] ip = getIP(ri);
         if (ip == null)
             return false;
@@ -469,6 +505,8 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
     /**
      *  Uses the transport IP first because that lookup is fast,
      *  then the IP from the netDb.
+     *  Not recommended for our local router hash, as we may not be either in the cache or netdb,
+     *  or may not be publishing an IP.
      *
      *  As of 0.9.32, works only for literal IPs, returns null for host names.
      *
@@ -535,9 +573,6 @@ public class CommSystemFacadeImpl extends CommSystemFacade {
             return c;
         return n;
     }
-
-    private static final String BUNDLE_NAME = "net.i2p.router.web.messages";
-    private static final String COUNTRY_BUNDLE_NAME = "net.i2p.router.countries.messages";
 
     /** Provide a consistent "look" for displaying router IDs in the console */
     @Override

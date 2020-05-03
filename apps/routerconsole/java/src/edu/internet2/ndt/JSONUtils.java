@@ -29,6 +29,8 @@ public class JSONUtils {
 	public static String getValueFromJsonObj(String jsonTxt, String key) {
 		JSONValue jsonParser = new JSONValue();
 		Map json = (Map)jsonParser.parse(new String(jsonTxt));
+		if (json == null)
+			return null;
 		Iterator iter = json.entrySet().iterator();
 		while(iter.hasNext()){
 			Map.Entry entry = (Map.Entry)iter.next();
@@ -64,6 +66,20 @@ public class JSONUtils {
 		JSONObject obj = new JSONObject();
 		obj.put("msg", new String(msg));
 
+		return obj.toJSONString().getBytes();
+	}
+
+	/**
+	 * Function that return json object represented by jsontext and included
+	 * single message assigned to "msg" key
+	 * @param msg {byte[]} message which should be assigned to json object
+	 * @return {byte[]} json object represented by jsontext and encodes into a sequence of bytes
+	 * @since 0.9.45
+	 */
+	public static byte[] createJsonLoginObj(byte[] msg, byte tests) {
+		JSONObject obj = new JSONObject();
+		obj.put("msg", new String(msg));
+		obj.put("tests", Integer.toString(tests & 0xff));
 		return obj.toJSONString().getBytes();
 	}
 }

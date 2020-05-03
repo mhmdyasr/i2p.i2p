@@ -21,7 +21,9 @@ import net.i2p.data.DataHelper;
 import net.i2p.data.Hash;
 import net.i2p.data.router.RouterAddress;
 import net.i2p.data.router.RouterInfo;
+import net.i2p.router.ClientManagerFacade;
 import net.i2p.router.NetworkDatabaseFacade;
+import net.i2p.router.Router;
 import net.i2p.router.RouterContext;
 import net.i2p.router.tunnel.pool.TunnelPeerSelector;
 import net.i2p.router.util.MaskedIPSet;
@@ -378,8 +380,8 @@ public class ProfileOrganizer {
                 _log.info("selectFastPeers("+howMany+"), not enough fast (" + matches.size() + ") going on to highCap");
             selectHighCapacityPeers(howMany, exclude, matches, mask);
         } else {
-            if (_log.shouldLog(Log.INFO))
-                _log.info("selectFastPeers("+howMany+"), found enough fast (" + matches.size() + ")");
+            if (_log.shouldDebug())
+                _log.debug("selectFastPeers("+howMany+"), found enough fast (" + matches.size() + ")");
         }
         return;
     }
@@ -446,8 +448,8 @@ public class ProfileOrganizer {
                 _log.info("selectFastPeers("+howMany+"), not enough fast (" + matches.size() + ") going on to highCap");
             selectHighCapacityPeers(howMany, exclude, matches, 2);
         } else {
-            if (_log.shouldLog(Log.INFO))
-                _log.info("selectFastPeers("+howMany+"), found enough fast (" + matches.size() + ")");
+            if (_log.shouldDebug())
+                _log.debug("selectFastPeers("+howMany+"), found enough fast (" + matches.size() + ")");
         }
         return;
     }
@@ -483,8 +485,8 @@ public class ProfileOrganizer {
                 _log.info("selectHighCap("+howMany+"), not enough highcap (" + matches.size() + ") going on to ANFP2");
             selectActiveNotFailingPeers2(howMany, exclude, matches, mask);
         } else {
-            if (_log.shouldLog(Log.INFO))
-                _log.info("selectHighCap("+howMany+"), found enough highCap (" + matches.size() + ")");
+            if (_log.shouldDebug())
+                _log.debug("selectHighCap("+howMany+"), found enough highCap (" + matches.size() + ")");
         }
         return;
     }
@@ -517,8 +519,8 @@ public class ProfileOrganizer {
                 _log.info("selectWellIntegrated("+howMany+"), not enough integrated (" + matches.size() + ") going on to notFailing");
             selectNotFailingPeers(howMany, exclude, matches, mask);
         } else {            
-            if (_log.shouldLog(Log.INFO))
-                _log.info("selectWellIntegrated("+howMany+"), found enough well integrated (" + matches.size() + ")");
+            if (_log.shouldDebug())
+                _log.debug("selectWellIntegrated("+howMany+"), found enough well integrated (" + matches.size() + ")");
         }
         
         return;
@@ -620,8 +622,8 @@ public class ProfileOrganizer {
                 _log.info("selectANFP2("+howMany+"), not enough ANFP (" + matches.size() + ") going on to notFailing");
             selectNotFailingPeers(howMany, exclude, matches, mask);
         } else {
-            if (_log.shouldLog(Log.INFO))
-                _log.info("selectANFP2("+howMany+"), found enough ANFP (" + matches.size() + ")");
+            if (_log.shouldDebug())
+                _log.debug("selectANFP2("+howMany+"), found enough ANFP (" + matches.size() + ")");
         }
     }
 
@@ -692,8 +694,7 @@ public class ProfileOrganizer {
     }                  
 
     /**                
-     * Get the peers the transport layer thinks are unreachable, and
-     * add in the peers with the SSU peer testing bug,
+     * Get the peers the transport layer thinks are unreachable,
      * and peers requiring introducers.
      *                 
      */                
@@ -707,36 +708,27 @@ public class ProfileOrganizer {
         } finally { releaseReadLock(); }
         List<Hash> l = new ArrayList<Hash>(count / 4);
         for (Hash peer : n) {
-            if (_context.commSystem().wasUnreachable(peer))
+            if (_context.commSystem().wasUnreachable(peer)) {
                 l.add(peer);
-            else {
-                // Blacklist <= 0.6.1.32 SSU-only peers, they don't know if they are unreachable,
-                // and we may not know either if they contacted us first, so assume they are.
-                // Also blacklist all peers requiring SSU introducers, because either
+            } else {
+                // Blacklist all peers requiring SSU introducers, because either
                 //  a) it's slow; or
                 //  b) it doesn't work very often; or
                 //  c) in the event they are advertising NTCP, it probably won't work because
                 //     they probably don't have a TCP hole punched in their firewall either.
                 RouterInfo info = _context.netDb().lookupRouterInfoLocally(peer);
                 if (info != null) {
-                    String v = info.getVersion();
-                    // this only works if there is no 0.6.1.34!
-                    if ((!v.equals("0.6.1.33")) &&
-                        v.startsWith("0.6.1.") && info.getTargetAddress("NTCP") == null)
-                        l.add(peer);
-                    else {
                         RouterAddress ra = info.getTargetAddress("SSU");
                         // peers with no SSU address at all are fine.
                         // as long as they have NTCP
                         if (ra == null) {
-                            if (info.getTargetAddress("NTCP") == null)
+                            if (info.getTargetAddresses("NTCP", "NTCP2").isEmpty())
                                 l.add(peer);
                             continue;
                         }
                         // This is the quick way of doing UDPAddress.getIntroducerCount() > 0
                         if (ra.getOption("ihost0") != null)
                             l.add(peer);
-                    }
                 }
             }
         }
@@ -792,9 +784,9 @@ public class ProfileOrganizer {
      * this method, but the averages are recalculated.
      *
      */
-    public void reorganize() { reorganize(false); }
+    void reorganize() { reorganize(false, false); }
 
-    public void reorganize(boolean shouldCoalesce) {
+    void reorganize(boolean shouldCoalesce, boolean shouldDecay) {
         long sortTime = 0;
         int coalesceTime = 0;
         long thresholdTime = 0;
@@ -802,7 +794,9 @@ public class ProfileOrganizer {
         int profileCount = 0;
         int expiredCount = 0;
         
-        long uptime = _context.router().getUptime();
+        // null for main()
+        Router r = _context.router();
+        long uptime = (r != null) ? r.getUptime() : 0L;
         long expireOlderThan = -1;
         if (uptime > 60*60*1000) {
             // dynamically adjust expire time to control memory usage
@@ -817,14 +811,14 @@ public class ProfileOrganizer {
         if (shouldCoalesce) {
             getReadLock();
             try {
+                long coalesceStart = System.currentTimeMillis();
                 for (PeerProfile prof : _strictCapacityOrder) {
                     if ( (expireOlderThan > 0) && (prof.getLastSendSuccessful() <= expireOlderThan) ) {
                         continue;
                     }
-                    long coalesceStart = System.currentTimeMillis();
-                    prof.coalesceOnly();
-                    coalesceTime += (int)(System.currentTimeMillis()-coalesceStart);
+                    prof.coalesceOnly(shouldDecay);
                 }
+                coalesceTime = (int)(System.currentTimeMillis()-coalesceStart);
             } finally {
                 releaseReadLock();
             }
@@ -1155,7 +1149,7 @@ public class ProfileOrganizer {
     }
     
     /**
-     * Update the _thresholdSpeedValue by calculating the median speed of all
+     * Update the _thresholdSpeedValue by calculating the average speed of all
      * high capacity peers. 
      *
      * @param reordered ordered set of PeerProfile objects, ordered by capacity
@@ -1196,11 +1190,14 @@ public class ProfileOrganizer {
     private void locked_calculateSpeedThresholdMean(Set<PeerProfile> reordered) {
         double total = 0;
         int count = 0;
+        int maxHighCapPeers = getMaximumHighCapPeers();
         for (PeerProfile profile : reordered) {
             if (profile.getCapacityValue() >= _thresholdCapacityValue) {
                 // duplicates being clobbered is fine by us
                 total += profile.getSpeedValue();
                 count++;
+                if (count >= maxHighCapPeers)
+                    break;
             } else {
                 // its ordered
                 break;
@@ -1401,7 +1398,8 @@ public class ProfileOrganizer {
             // don't allow them in the high-cap pool, what would the point of that be?
             if (_thresholdCapacityValue <= profile.getCapacityValue() &&
                 isSelectable(peer) &&
-                !_context.commSystem().isInBadCountry(peer)) {
+                // null for tests
+                (_context.commSystem() == null || !_context.commSystem().isInStrictCountry(peer))) {
                 _highCapacityPeers.put(peer, profile);
                 if (_log.shouldLog(Log.DEBUG))
                     _log.debug("High capacity: \t" + peer);
@@ -1453,8 +1451,12 @@ public class ProfileOrganizer {
      * @return minimum number of peers to be placed in the 'fast' group
      */
     protected int getMinimumFastPeers() {
+        // null for main()
+        ClientManagerFacade cm = _context.clientManager();
+        if (cm == null)
+            return DEFAULT_MAXIMUM_FAST_PEERS;
         int def = Math.min(DEFAULT_MAXIMUM_FAST_PEERS,
-                           (6 *_context.clientManager().listClients().size()) + DEFAULT_MINIMUM_FAST_PEERS - 2);
+                           (6 * cm.listClients().size()) + DEFAULT_MINIMUM_FAST_PEERS - 2);
         return _context.getProperty(PROP_MINIMUM_FAST_PEERS, def);
     }
     
@@ -1491,6 +1493,11 @@ public class ProfileOrganizer {
      * </pre>
      */
     public static void main(String args[]) {
+        if (args.length <= 0) {
+            System.err.println("Usage: profileorganizer file.txt.gz [file2.txt.gz] ...");
+            System.exit(1);
+        }
+
         RouterContext ctx = new RouterContext(null); // new net.i2p.router.Router());
         ProfileOrganizer organizer = new ProfileOrganizer(ctx);
         organizer.setUs(Hash.FAKE_HASH);
@@ -1504,27 +1511,26 @@ public class ProfileOrganizer {
             organizer.addProfile(profile);
         }
         organizer.reorganize();
-        DecimalFormat fmt = new DecimalFormat("0,000.0");
-        fmt.setPositivePrefix("+");
+        DecimalFormat fmt = new DecimalFormat("0000.0");
         
         for (Hash peer : organizer.selectAllPeers()) {
             PeerProfile profile = organizer.getProfile(peer);
             if (!profile.getIsActive()) {
-                System.out.println("Peer " + profile.getPeer().toBase64().substring(0,4) 
+                System.out.println("Peer " + peer.toBase64().substring(0,4) 
                            + " [" + (organizer.isFast(peer) ? "IF+R" : 
                                      organizer.isHighCapacity(peer) ? "IR  " :
                                      organizer.isFailing(peer) ? "IX  " : "I   ") + "]: "
-                           + "\t Speed:\t" + fmt.format(profile.getSpeedValue())
+                           + " Speed:\t" + fmt.format(profile.getSpeedValue())
                            + " Capacity:\t" + fmt.format(profile.getCapacityValue())
                            + " Integration:\t" + fmt.format(profile.getIntegrationValue())
                            + " Active?\t" + profile.getIsActive() 
                            + " Failing?\t" + profile.getIsFailing());
             } else {
-                System.out.println("Peer " + profile.getPeer().toBase64().substring(0,4) 
+                System.out.println("Peer " + peer.toBase64().substring(0,4) 
                            + " [" + (organizer.isFast(peer) ? "F+R " : 
                                      organizer.isHighCapacity(peer) ? "R   " :
                                      organizer.isFailing(peer) ? "X   " : "    ") + "]: "
-                           + "\t Speed:\t" + fmt.format(profile.getSpeedValue())
+                           + " Speed:\t" + fmt.format(profile.getSpeedValue())
                            + " Capacity:\t" + fmt.format(profile.getCapacityValue())
                            + " Integration:\t" + fmt.format(profile.getIntegrationValue())
                            + " Active?\t" + profile.getIsActive() 

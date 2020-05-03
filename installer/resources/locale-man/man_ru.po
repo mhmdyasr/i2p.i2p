@@ -12,13 +12,14 @@
 # 1 2 <sulyukin@gmail.com>, 2017
 # Boris Shminke, 2017
 # R4SAS, 2019
+# zzzi2p, 2019
 # 
 msgid ""
 msgstr ""
 "Project-Id-Version: I2P man pages\n"
 "POT-Creation-Date: 2017-01-26 15:24+0000\n"
 "PO-Revision-Date: 2017-01-26 15:31+0000\n"
-"Last-Translator: R4SAS, 2019\n"
+"Last-Translator: zzzi2p, 2019\n"
 "Language-Team: Russian (Russia) (https://www.transifex.com/otf/teams/12694/ru_RU/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -170,7 +171,7 @@ msgstr ""
 #. type: Plain text
 #: man/eepget.1:55
 msgid "B<-n> retries"
-msgstr "В<-n> попыток"
+msgstr "B<-n> попыток"
 
 #. type: TP
 #: man/eepget.1:55

@@ -10,9 +10,11 @@ package net.i2p.data;
  */
 
 import java.util.Arrays;
+import javax.security.auth.Destroyable;
 
 import net.i2p.crypto.EncType;
 import net.i2p.crypto.KeyGenerator;
+import net.i2p.util.SimpleByteCache;
 
 /**
  * Defines the PrivateKey as defined by the I2P data structure spec.
@@ -24,11 +26,13 @@ import net.i2p.crypto.KeyGenerator;
  *
  * @author jrandom
  */
-public class PrivateKey extends SimpleDataStructure {
+public class PrivateKey extends SimpleDataStructure implements Destroyable {
     private static final EncType DEF_TYPE = EncType.ELGAMAL_2048;
     public final static int KEYSIZE_BYTES = DEF_TYPE.getPrivkeyLen();
 
     private final EncType _type;
+    // cache
+    private PublicKey _pubKey;
 
     public PrivateKey() {
         this(DEF_TYPE);
@@ -59,6 +63,19 @@ public class PrivateKey extends SimpleDataStructure {
         setData(data);
     }
 
+    /**
+     *  @param type non-null
+     *  @param data must be non-null
+     *  @param pubKey corresponding pubKey to be cached
+     *  @since 0.9.44
+     */
+    public PrivateKey(EncType type, byte data[], PublicKey pubKey) {
+        this(type, data);
+        if (type != pubKey.getType())
+            throw new IllegalArgumentException("Pubkey mismatch");
+        _pubKey = pubKey;
+    }
+
     /** constructs from base64
      * @param base64Data a string of base64 data (the output of .toBase64() called
      * on a prior instance of PrivateKey
@@ -80,13 +97,42 @@ public class PrivateKey extends SimpleDataStructure {
         return _type;
     }
 
-    /** derives a new PublicKey object derived from the secret contents
-     * of this PrivateKey
+    /**
+     * Derives a new PublicKey object derived from the secret contents
+     * of this PrivateKey.
+     * As of 0.9.44, the PublicKey is cached.
+     *
      * @return a PublicKey object
      * @throws IllegalArgumentException on bad key
      */
     public PublicKey toPublic() {
-        return KeyGenerator.getPublicKey(this);
+        if (_pubKey == null)
+            _pubKey = KeyGenerator.getPublicKey(this);
+        return _pubKey;
+    }
+
+    /**
+     *  javax.security.auth.Destroyable interface
+     *
+     *  @since 0.9.40
+     */
+    public void destroy() {
+        byte[] data = _data;
+        if (data != null) {
+            _data = null;
+            Arrays.fill(data, (byte) 0);
+            SimpleByteCache.release(data);
+        }
+        _pubKey = null;
+    }
+
+    /**
+     *  javax.security.auth.Destroyable interface
+     *
+     *  @since 0.9.40
+     */
+    public boolean isDestroyed() {
+        return _data == null;
     }
 
     /**
@@ -95,12 +141,15 @@ public class PrivateKey extends SimpleDataStructure {
     @Override
     public String toString() {
         StringBuilder buf = new StringBuilder(64);
-        buf.append("[PrivateKey ").append(_type).append(": ");
-        int length = length();
+        buf.append("[PrivateKey ").append(_type).append(' ');
         if (_data == null) {
             buf.append("null");
         } else {
-            buf.append("size: ").append(length);
+            int length = length();
+            if (length <= 32)
+                buf.append(toBase64());
+            else
+                buf.append("size: ").append(length);
         }
         buf.append(']');
         return buf.toString();

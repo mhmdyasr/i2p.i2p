@@ -28,7 +28,7 @@
         request.setCharacterEncoding("UTF-8");
 
     response.setHeader("X-Frame-Options", "SAMEORIGIN");
-    response.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'");
+    response.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; form-action 'self'; frame-ancestors 'self'; media-src 'none'");
     response.setHeader("X-XSS-Protection", "1; mode=block");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Referrer-Policy", "no-referrer");
@@ -37,7 +37,6 @@
 %>
 <%@page pageEncoding="UTF-8"%>
 <%@ page contentType="text/html"%>
-<%@ taglib prefix="c" uri="http://java.sun.com/jsp/jstl/core"%>
 <jsp:useBean id="version" class="i2p.susi.dns.VersionBean" scope="application" />
 <jsp:useBean id="base" class="i2p.susi.dns.BaseBean" scope="session" />
 <jsp:useBean id="intl" class="i2p.susi.dns.Messages" scope="application" />
@@ -50,12 +49,9 @@
 </head>
 <body>
 <div class="page">
-<div id="logo">
-<img src="<%=base.getTheme()%>images/logo.png" alt="susidns logo" border="0">
-</div>
 <hr>
 <div id="navi">
-<a id="overview" href="index"><%=intl._t("Overview")%></a>&nbsp;
+<a id="overview" class="active" href="index"><%=intl._t("Overview")%></a>&nbsp;
 <a class="abook" href="addressbook?book=private&amp;filter=none"><%=intl._t("Private")%></a>&nbsp;
 <a class="abook" href="addressbook?book=master&amp;filter=none"><%=intl._t("Master")%></a>&nbsp;
 <a class="abook" href="addressbook?book=router&amp;filter=none"><%=intl._t("Router")%></a>&nbsp;

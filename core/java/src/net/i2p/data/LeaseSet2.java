@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 import net.i2p.I2PAppContext;
 import net.i2p.crypto.DSAEngine;
@@ -43,8 +44,16 @@ public class LeaseSet2 extends LeaseSet {
     // If this leaseset was formerly blinded, the blinded hash, so we can find it again
     private Hash _blindedHash;
 
-    private static final int FLAG_OFFLINE_KEYS = 1;
-    private static final int FLAG_UNPUBLISHED = 2;
+    // true for testing
+    private static final boolean IGNORE_SERVER_KEY_PREFERENCE = false;
+
+    private static final int FLAG_OFFLINE_KEYS = 0x01;
+    private static final int FLAG_UNPUBLISHED = 0x02;
+    /**
+     *  Set if the unencrypted LS, when published, will be blinded/encrypted
+     *  @since 0.9.42
+     */
+    private static final int FLAG_BLINDED = 0x04;
     private static final int MAX_KEYS = 8;
 
     public LeaseSet2() {
@@ -81,6 +90,22 @@ public class LeaseSet2 extends LeaseSet {
 
     public void setUnpublished() {
         _flags |= FLAG_UNPUBLISHED;
+    }
+
+    /**
+     *  Set if the unencrypted LS, when published, will be blinded/encrypted
+     *  @since 0.9.42
+     */
+    public boolean isBlindedWhenPublished() {
+        return (_flags & FLAG_BLINDED) != 0;
+    }
+
+    /**
+     *  Set if the unencrypted LS, when published, will be blinded/encrypted
+     *  @since 0.9.42
+     */
+    public void setBlindedWhenPublished() {
+        _flags |= FLAG_BLINDED;
     }
     
     /**
@@ -120,7 +145,41 @@ public class LeaseSet2 extends LeaseSet {
     }
 
     /**
+     *  If more than one key, return the first supported one.
+     *  If none supported, return null.
+     *
+     *  @return first supported key or null
+     *  @since 0.9.44
+     */
+    @Override
+    public PublicKey getEncryptionKey(Set<EncType> supported) {
+        List<PublicKey> keys = getEncryptionKeys();
+        if (keys == null)
+            return null;
+        if (!IGNORE_SERVER_KEY_PREFERENCE || supported.size() <= 1 || keys.size() <= 1) {
+            // Honor order in LS
+            for (PublicKey pk : keys) {
+                if (supported.contains(pk.getType()))
+                    return pk;
+            }
+        } else {
+            // Our preference, newest enc type first
+            List<EncType> types = new ArrayList<EncType>(supported);
+            Collections.sort(types, Collections.reverseOrder());
+            for (EncType type : types) {
+                for (PublicKey pk : keys) {
+                    if (type == pk.getType())
+                        return pk;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      *  Add an encryption key.
+     *
+     *  Encryption keys should be added in order of server preference, most-preferred first.
      */
     public void addEncryptionKey(PublicKey key) {
         if (_encryptionKey == null) {
@@ -139,6 +198,11 @@ public class LeaseSet2 extends LeaseSet {
 
     /**
      *  This returns all the keys. getEncryptionKey() returns the first one.
+     *
+     *  Encryption keys should be in order of server preference, most-preferred first.
+     *  Client behavior should be to select the first key with a supported encryption type.
+     *  Clients may use other selection algorithms based on encryption support, relative performance, and other factors.
+     *
      *  @return not a copy, do not modify, null if none
      */
     public List<PublicKey> getEncryptionKeys() {

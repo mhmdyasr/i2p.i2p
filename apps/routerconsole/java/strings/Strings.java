@@ -39,39 +39,23 @@ class Dummy {
         _t("eepsite");
         _t("I2P webserver");
         _t("HTTP Proxy");        
-        // older names for pre-0.7.4 installs
-        _t("eepProxy");
-        _t("ircProxy");
         // hardcoded in i2psnark
         _t("I2PSnark");
-        // hardcoded in iMule?
-        _t("iMule");
 
 
         // standard themes for ConfigUIHelper
-        _t("classic");
         _t("dark");
         _t("light");
-        _t("midnight");        
 
         // stat groups for stats.jsp
+        // See StatsGenerator for groups mapped to a display name
         _t("Bandwidth");
-        _t("BandwidthLimiter");
-        _t("ClientMessages");
         _t("Encryption");
-        _t("i2cp");
-        _t("I2PTunnel");
-        _t("InNetPool");
-        _t("JobQueue");
-        _t("NetworkDatabase");
-        _t("ntcp");
         _t("Peers");
         _t("Router");
         _t("Stream");
-        _t("Throttle");
         _t("Transport");
         _t("Tunnels");
-        _t("udp");
 
         // parameters in transport addresses (netdb.jsp)
         // may or may not be worth translating

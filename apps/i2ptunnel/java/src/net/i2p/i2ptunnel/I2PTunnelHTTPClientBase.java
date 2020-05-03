@@ -77,6 +77,12 @@ public abstract class I2PTunnelHTTPClientBase extends I2PTunnelClientBase implem
      */
     protected static final int INITIAL_SO_TIMEOUT = 15*1000;
 
+    /**
+     *  Failsafe
+     *  @since 0.9.42
+     */
+    protected static final int BROWSER_READ_TIMEOUT = 4*60*60*1000;
+
     private static final String ERR_AUTH1 =
             "HTTP/1.1 407 Proxy Authentication Required\r\n" +
             "Content-Type: text/html; charset=UTF-8\r\n" +
@@ -277,6 +283,10 @@ public abstract class I2PTunnelHTTPClientBase extends I2PTunnelClientBase implem
                                EventDispatcher notifyThis, String handlerName, 
                                I2PTunnel tunnel) throws IllegalArgumentException {
         super(localPort, ownDest, l, notifyThis, handlerName, tunnel);
+        // force connect delay and bulk profile
+        Properties opts = tunnel.getClientOptions();
+        opts.setProperty("i2p.streaming.connectDelay", "200");
+        opts.remove("i2p.streaming.maxWindowSize");
         _proxyList = new ArrayList<String>(4);
         _proxyNonce = new byte[PROXYNONCE_BYTES];
         _context.random().nextBytes(_proxyNonce);
@@ -293,6 +303,10 @@ public abstract class I2PTunnelHTTPClientBase extends I2PTunnelClientBase implem
             I2PTunnel tunnel, EventDispatcher notifyThis, long clientId )
             throws IllegalArgumentException {
         super(localPort, l, sktMgr, tunnel, notifyThis, clientId);
+        // force connect delay and bulk profile
+        Properties opts = tunnel.getClientOptions();
+        opts.setProperty("i2p.streaming.connectDelay", "200");
+        opts.remove("i2p.streaming.maxWindowSize");
         _proxyList = new ArrayList<String>(4);
         _proxyNonce = new byte[PROXYNONCE_BYTES];
         _context.random().nextBytes(_proxyNonce);

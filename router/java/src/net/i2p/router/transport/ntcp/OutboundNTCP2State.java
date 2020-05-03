@@ -106,7 +106,7 @@ class OutboundNTCP2State implements EstablishState {
         _state = State.OB_INIT;
         _tmp = new byte[TOTAL1_MAX];
         try {
-            _handshakeState = new HandshakeState(HandshakeState.INITIATOR, _transport.getXDHFactory());
+            _handshakeState = new HandshakeState(HandshakeState.PATTERN_ID_XK, HandshakeState.INITIATOR, _transport.getXDHFactory());
         } catch (GeneralSecurityException gse) {
             throw new IllegalStateException("bad proto", gse);
         }
@@ -191,6 +191,8 @@ class OutboundNTCP2State implements EstablishState {
         if (_log.shouldLog(Log.DEBUG))
             _log.debug(this + "send X");
         byte options[] = new byte[OPTIONS1_SIZE];
+        // network ID cross-check, proposal 147
+        options[0] = (byte) (_context.router().getNetworkID());
         options[1] = NTCPTransport.NTCP2_INT_VERSION;
         int padlen1 = _context.random().nextInt(PADDING1_MAX);
         DataHelper.toLong(options, 2, 2, padlen1);

@@ -70,10 +70,10 @@ public final class ElGamalEngine {
      *
      */
     public ElGamalEngine(I2PAppContext context) {
-        context.statManager().createRequiredRateStat("crypto.elGamal.encrypt",
+        context.statManager().createRateStat("crypto.elGamal.encrypt",
                                              "Time for ElGamal encryption (ms)", "Encryption",
                                              new long[] { 60 * 60 * 1000});
-        context.statManager().createRequiredRateStat("crypto.elGamal.decrypt",
+        context.statManager().createRateStat("crypto.elGamal.decrypt",
                                              "Time for ElGamal decryption (ms)", "Encryption",
                                              new long[] { 60 * 60 * 1000});
         _context = context;
@@ -119,6 +119,9 @@ public final class ElGamalEngine {
         if ((data == null) || (data.length > ELG_CLEARTEXT_LENGTH))
             throw new IllegalArgumentException("Data to encrypt must be <= 222 bytes");
         if (publicKey == null) throw new IllegalArgumentException("Null public key specified");
+        EncType type = publicKey.getType();
+        if (type != EncType.ELGAMAL_2048)
+            throw new IllegalArgumentException("Bad public key type " + type);
 
         long start = _context.clock().now();
 
@@ -193,6 +196,9 @@ public final class ElGamalEngine {
      * @return unencrypted data or null on failure
      */
     public byte[] decrypt(byte encrypted[], PrivateKey privateKey) {
+        EncType type = privateKey.getType();
+        if (type != EncType.ELGAMAL_2048)
+            throw new IllegalArgumentException("Bad private key type " + type);
         if ((encrypted == null) || (encrypted.length != ELG_ENCRYPTED_LENGTH))
             throw new IllegalArgumentException("Data to decrypt must be exactly ELG_ENCRYPTED_LENGTH bytes");
         long start = _context.clock().now();
